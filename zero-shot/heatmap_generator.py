@@ -22,14 +22,16 @@ class HeatmapGenerator:
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [Frames, Height, Width]
         """
+
+        if feature_maps.shape[-1] == feature_maps.shape[-2]:
+            feature_maps = feature_maps.permute(0, 2, 3, 1)
+
+        if feature_maps.dtype != torch.float32:
+            feature_maps = feature_maps.float()
         
         point_proj = self.__project_point_coordinates(target_coordinates)
-        print("projected point: ")
-        print(point_proj)
 
         target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
-        print("sample feat vec")
-        print(target_feat_vec)
 
         F, H, W, C = feature_maps.shape
 
@@ -59,6 +61,7 @@ class HeatmapGenerator:
         
         if scaled:
             heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)
+            heatmaps_scaled = heatmaps_scaled.to("cpu").squeeze().numpy()
         
         heatmaps = heatmaps.to("cpu").squeeze().numpy()
         
