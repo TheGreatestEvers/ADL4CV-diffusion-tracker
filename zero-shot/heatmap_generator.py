@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import math
+from PIL import Image, ImageSequence
 
 class HeatmapGenerator:
     """
@@ -43,6 +44,30 @@ class HeatmapGenerator:
         heatmaps = heatmaps / (norm_target_feat_vec * norm_feat_vecs)
 
         return heatmaps
+    
+    def safe_heatmap_as_gif(self, heatmaps, scaled=True, spatial_input_space=256):
+        """
+        Safe generated heatmaps as gif.
+
+        Args:
+            heatmaps: Heatmaps tensor with Dimension: [Frames, Height, Width, 1]
+            scaled: Determines whether to also safe scaled heatmaps
+            spatial_input_space: Spatial size of image space
+        """
+
+        heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)) * 255
+        
+        if scaled:
+            heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)
+        
+        heatmaps = heatmaps.to("cpu").squeeze().numpy()
+        
+        frames_gif = [Image.fromarray(f) for f in heatmaps]
+        frames_gif[0].save("output/heatmaps.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
+
+        if scaled:
+            frames_gif = [Image.fromarray(f) for f in heatmaps_scaled]
+            frames_gif[0].save("output/heatmaps_scaled.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
 
     def __project_point_coordinates(self, point_input_space, spatial_input_space=256, spatial_latent_space=32):
         """
