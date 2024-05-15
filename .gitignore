@@ -159,6 +159,9 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+text-to-video-ms-1.7b
+
+**/__pycache__
 
 # Testing stuff
 test.*
