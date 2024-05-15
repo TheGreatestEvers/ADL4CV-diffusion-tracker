@@ -23,7 +23,7 @@ class ZeroShotTracker:
 
         # Scale heatmap from latent spatials to image spatials
         heatmaps = torch.permute(heatmaps, (0, 3, 1, 2))
-        heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear")
+        heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
 
         # Get max coordinates for each frame # DOES NOT DEAL WITH MULTIPLE MAXIMA !!!!
         tracks = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(heatmaps.size(0))], dim=0).squeeze()
@@ -60,7 +60,7 @@ class ZeroShotTracker:
 
         if safe_as_gif:
             frames_gif = [Image.fromarray(f) for f in frames_marked]
-            frames_gif[0].save("marked_frames.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
+            frames_gif[0].save("output/marked_frames.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
 
 
 

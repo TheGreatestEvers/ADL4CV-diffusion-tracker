@@ -165,3 +165,5 @@ text-to-video-ms-1.7b
 
 # Testing stuff
 test.*
+
+zero-shot/output/*.gif
