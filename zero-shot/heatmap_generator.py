@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import math
 from PIL import Image, ImageSequence
+from zero_shot_tracker import ZeroShotTracker
 
 class HeatmapGenerator:
     """
@@ -11,13 +12,15 @@ class HeatmapGenerator:
     def __init__(self) -> None:
         ...
     
-    def generate(self, feature_maps, target_coordinates):
+    def generate(self, feature_maps, target_coordinates, mode="keep_feat_vec"):
         """
         Generates Heatmaps.
 
         Args:
             features_maps: Tensor with concatenation of feature maps. Dimension: [Frames, Height, Width, Channels]
             target_coordinates: Tuple with coordinates of point to track. Format: (y, x, time)
+            mode: Either "keep_feat_vec" or "resample_feat_vec". First uses feature vector from inital point to generate heatmaps for all
+                  frames latter, latter resamples features vector after each point estimation 
 
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [Frames, Height, Width]
@@ -29,21 +32,54 @@ class HeatmapGenerator:
         if feature_maps.dtype != torch.float32:
             feature_maps = feature_maps.float()
         
-        point_proj = self.__project_point_coordinates(target_coordinates)
-
-        target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
-
         F, H, W, C = feature_maps.shape
-
-        target_feat_vec = target_feat_vec.view(1, 1, 1, -1)  
-        target_feat_vec = target_feat_vec.expand(F, H, W, C)
         
-        # Create heatmaps using cosine-similarity
-        norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
-        norm_feat_vecs = torch.norm(feature_maps, dim=-1, keepdim=True)
+        if mode == "keep_feat_vec":
+            point_proj = self.__project_point_coordinates(target_coordinates)
 
-        heatmaps = torch.sum(feature_maps * target_feat_vec, dim=-1, keepdim=True) 
-        heatmaps = heatmaps / (norm_target_feat_vec * norm_feat_vecs)
+            target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
+
+            target_feat_vec = target_feat_vec.view(1, 1, 1, -1)  
+            target_feat_vec = target_feat_vec.expand(F, H, W, C)
+            
+            # Create heatmaps using cosine-similarity
+            norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
+            norm_feat_vecs = torch.norm(feature_maps, dim=-1, keepdim=True)
+
+            heatmaps = torch.sum(feature_maps * target_feat_vec, dim=-1, keepdim=True) 
+            heatmaps = heatmaps / (norm_target_feat_vec * norm_feat_vecs)
+
+        elif mode == "resample_feat_vec": # Not working
+
+            tracker = ZeroShotTracker()
+            heatmaps = torch.zeros(F, 32, 32, 1)
+            for t in range(F):
+                point_proj = self.__project_point_coordinates(target_coordinates)
+
+                target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
+
+                feat_map = feature_maps[t]
+
+                target_feat_vec = target_feat_vec.view(1, 1, -1)  
+                target_feat_vec = target_feat_vec.expand(H, W, C)
+
+                norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
+                norm_feat_vecs = torch.norm(feat_map, dim=-1, keepdim=True)
+
+                heatmap = torch.sum(feat_map * target_feat_vec, dim=-1, keepdim=True) 
+                heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
+
+                heatmap = heatmap.unsqueeze(0)
+
+                track_estimation = tracker.track(heatmap)[0]
+
+                target_coordinates = (track_estimation[0], track_estimation[1], t)
+
+                heatmaps[t] = heatmap[0]
+
+        else:
+            raise ValueError("Mode has to be either keep_feat_vec or resample_feat_vec.")
+
 
         return heatmaps
     
