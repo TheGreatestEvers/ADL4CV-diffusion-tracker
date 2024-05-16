@@ -25,11 +25,16 @@ class ZeroShotTracker:
         heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)).to("cpu")
         heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
 
+        F, _, H, W = heatmaps.shape
+
         # Get max coordinates for each frame 
-        max_coordinates = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(heatmaps.size(0))], dim=0).squeeze()
+        max_coordinates = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(F)], dim=0).squeeze()
+        
+        # If only one frame is processed an extra dimension needs to be added
+        if F == 1:
+            max_coordinates = max_coordinates.unsqueeze(0)
 
         # Calculate estimation as weighted sum of points in the vicinity (max dist of 2 using L1) of max coordinate
-        F, _, H, W = heatmaps.shape
         vicinity_distance = 2
         tracks = np.zeros((F, 2))
 
@@ -55,7 +60,7 @@ class ZeroShotTracker:
 
             tracks[f, :] = weighted_coordinates
             
-            tracks = np.rint(tracks).astype("int") # Round track coordinates
+            tracks = tracks
 
         return torch.from_numpy(tracks)
 
@@ -72,6 +77,9 @@ class ZeroShotTracker:
         """
 
         tracks = tracks.to("cpu").numpy()
+
+        # Round coordinates to int in case they are float for some reason
+        tracks = np.rint(tracks).astype(int)
 
         frames_marked = frames
         for i in range(tracks.shape[0]):
