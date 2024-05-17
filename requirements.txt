@@ -1,0 +1,7 @@
+torch
+diffusers 
+accelerate 
+transformers
+mediapy
+tensorflow
+tensorflow_datasets
