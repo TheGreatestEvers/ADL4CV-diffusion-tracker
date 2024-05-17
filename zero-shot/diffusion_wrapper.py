@@ -1,6 +1,6 @@
 import os
 import torch
-import torchvision.transforms.functional as F
+import torchvision.transforms.functional as functional
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet3DConditionModel, DDIMScheduler
 from diffusers import DiffusionPipeline
@@ -50,23 +50,40 @@ class DiffusionWrapper:
             video: torch.Tensor | str,
             prompt: str = ""
     ):
-        if not isinstance(video, torch.Tensor):
-            video = load_video(video)
+        """
+        Extract video diffusion features from a heatmap.
+
+        Args:
+            video: torch.Tensor (BxFxHxWxC) | str path to video file
+            prompt: caption for text-to-video diffusion
+
+        Returns:
+            feature map tensor (BxFxC_fxH/8xW/8)
+        """
+
+        if isinstance(video, str):
+            video = load_video(video).unsqueeze(0)
+
+        video = video.permute(0, 1, 4, 2, 3)
+
+        B, F, C, H, W = video.shape
 
         video = video.to(dtype=torch.float16 , device=self.device) / 255.0
 
-        
         tokenized_prompt = self.tokenizer(
-            prompt, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt"
+            [prompt]*B, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt"
         )
 
         with torch.no_grad():
             text_embeddings = self.text_encoder(tokenized_prompt.input_ids.to(self.device))[0]
 
 
+        video = video.view(B*F, C, H, W)
         with torch.no_grad():
             latent_video = self.vae.encode(video).latent_dist.sample()
 
+        _, LC, LH, LW = latent_video.shape
+        latent_video = latent_video.view(B, F, LC, LH, LW)
 
         noise = torch.randn(latent_video.shape, dtype=torch.float16, device=self.device)
         latent_video = self.scheduler.add_noise(latent_video, noise, torch.tensor(1, device=self.device))
@@ -74,13 +91,15 @@ class DiffusionWrapper:
         self.feature_maps.clear()
 
         with torch.no_grad():
-            noise_pred = self.unet(latent_video.unsqueeze(0).permute(0, 2, 1, 3, 4), torch.tensor(1, device=self.device), encoder_hidden_states=text_embeddings).sample
+            self.unet(latent_video.permute(0, 2, 1, 3, 4), torch.tensor(1, device=self.device), encoder_hidden_states=text_embeddings).sample
 
         max_height_width = 0
         for feature_map in self.feature_maps:
             max_height_width = feature_map.shape[-1] if max_height_width < feature_map.shape[-1] else max_height_width
 
-        adj_feature_map = torch.cat([F.resize(feature_map, [max_height_width]*2) for feature_map in self.feature_maps], dim=1)
+        adj_feature_map = torch.cat([functional.resize(feature_map, [max_height_width]*2) for feature_map in self.feature_maps], dim=1)
+        _, FC, FH, FW = adj_feature_map.shape
+        adj_feature_map = adj_feature_map.view(B, F, FC, FH, FW)
 
         return adj_feature_map
 
