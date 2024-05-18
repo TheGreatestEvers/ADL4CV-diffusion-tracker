@@ -3,5 +3,6 @@ diffusers
 accelerate 
 transformers
 mediapy
+av
 tensorflow
 tensorflow_datasets
