@@ -513,7 +513,6 @@ def create_davis_dataset(
       if resolution is not None and resolution != frames.shape[1:3]:
         frames = resize_video(frames, resolution)
 
-    frames = frames.astype(np.float32)
     target_points = davis_points_dataset[video_name]['points']
     target_occ = davis_points_dataset[video_name]['occluded']
     target_points = target_points * np.array([frames.shape[2], frames.shape[1]])
