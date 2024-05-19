@@ -169,3 +169,5 @@ test.*
 zero-shot/output/*.gif
 
 video_features.pt
+
+tapvid_davis
