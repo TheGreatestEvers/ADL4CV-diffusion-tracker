@@ -122,6 +122,8 @@ class DiffusionWrapper:
         with torch.no_grad():
             self.unet(latent_video.permute(0, 2, 1, 3, 4), torch.tensor(1, device=self.device), encoder_hidden_states=text_embeddings).sample
 
+        self.pipeline = self.pipeline.to(device='cpu')
+
         return self.feature_maps
 
 
