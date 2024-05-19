@@ -1,4 +1,5 @@
 import os
+import gc
 import torch
 import torchvision.transforms.functional as functional
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -17,7 +18,8 @@ class DiffusionWrapper:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.pipeline = DiffusionPipeline.from_pretrained(self.model_path, torch_dtype=torch.float16, variant="fp16")
-        self.pipeline.enable_model_cpu_offload()
+        self.pipeline.enable_sequential_cpu_offload()
+        self.pipeline.enable_vae_slicing()
 
         self.tokenizer = self.pipeline.tokenizer
         self.text_encoder = self.pipeline.text_encoder
@@ -89,40 +91,42 @@ class DiffusionWrapper:
             feature_map: A dictionary of feature map tensors, where each key corresponds to a different level of extracted features.
         """
 
-        if isinstance(video, str):
-            video = load_video(video).unsqueeze(0)
-
-        video = video.permute(0, 1, 4, 2, 3)
-
-        B, F, C, H, W = video.shape
-
-        video = video.to(dtype=torch.float16 , device=self.device) / 255.0
-
-        tokenized_prompt = self.tokenizer(
-            [prompt]*B, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt"
-        )
-
         with torch.no_grad():
+
+            if isinstance(video, str):
+                video = load_video(video).unsqueeze(0)
+
+            video = video.permute(0, 1, 4, 2, 3)
+
+            B, F, C, H, W = video.shape
+
+            video = video.to(dtype=torch.float16 , device=self.device) / 255.0
+
+            tokenized_prompt = self.tokenizer(
+                [prompt]*B, padding="max_length", max_length=self.tokenizer.model_max_length, truncation=True, return_tensors="pt"
+            )
+
             text_embeddings = self.text_encoder(tokenized_prompt.input_ids.to(self.device))[0]
 
 
-        video = video.view(B*F, C, H, W)
-        with torch.no_grad():
+            video = video.view(B*F, C, H, W)
+
             latent_video = self.vae.encode(video).latent_dist.sample()
 
-        _, LC, LH, LW = latent_video.shape
-        latent_video = latent_video.view(B, F, LC, LH, LW)
+            _, LC, LH, LW = latent_video.shape
+            latent_video = latent_video.view(B, F, LC, LH, LW)
 
-        noise = torch.randn(latent_video.shape, dtype=torch.float16, device=self.device)
-        latent_video = self.scheduler.add_noise(latent_video, noise, torch.tensor(1, device=self.device))
+            noise = torch.randn(latent_video.shape, dtype=torch.float16, device=self.device)
+            latent_video = self.scheduler.add_noise(latent_video, noise, torch.tensor(1, device=self.device))
 
-        for key in self.feature_maps.keys():
-            self.feature_maps[key].clear()
+            for key in self.feature_maps.keys():
+                self.feature_maps[key].clear()
 
-        with torch.no_grad():
             self.unet(latent_video.permute(0, 2, 1, 3, 4), torch.tensor(1, device=self.device), encoder_hidden_states=text_embeddings).sample
 
-        self.pipeline = self.pipeline.to(device='cpu')
+
+        torch.cuda.empty_cache()
+        gc.collect()
 
         return self.feature_maps
 
