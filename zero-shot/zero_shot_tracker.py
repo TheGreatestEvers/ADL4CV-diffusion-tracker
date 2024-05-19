@@ -22,13 +22,47 @@ class ZeroShotTracker:
         """
 
         # Scale heatmap from latent spatials to image spatials
-        heatmaps = torch.permute(heatmaps, (0, 3, 1, 2))
+        heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)).to("cpu")
         heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
 
-        # Get max coordinates for each frame # DOES NOT DEAL WITH MULTIPLE MAXIMA !!!!
-        tracks = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(heatmaps.size(0))], dim=0).squeeze()
+        F, _, H, W = heatmaps.shape
 
-        return tracks
+        # Get max coordinates for each frame 
+        max_coordinates = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(F)], dim=0).squeeze()
+        
+        # If only one frame is processed an extra dimension needs to be added
+        if F == 1:
+            max_coordinates = max_coordinates.unsqueeze(0)
+
+        # Calculate estimation as weighted sum of points in the vicinity (max dist of 2 using L1) of max coordinate
+        vicinity_distance = 2
+        tracks = np.zeros((F, 2))
+
+        for f in range(F):
+            # Get vicinity coordinates
+            vicinity_points = []
+            y = max_coordinates[f, 0]
+            x = max_coordinates[f, 1]
+            for i in range(y - vicinity_distance, y + vicinity_distance + 1):
+                for j in range(x - vicinity_distance, x + vicinity_distance + 1):
+                    if 0 <= i < H and 0 <= j < W:  # Ensure the point is within the tensor boundaries
+                        if abs(i - y) + abs(j - x) <= vicinity_distance:
+                            vicinity_points.append((i, j))
+            vicinity_points = np.array(vicinity_points)
+
+            # Weighted sum of coordinates
+            weighted_coordinates = np.zeros(2)
+            normalization = 0
+            for p in vicinity_points:
+                weighted_coordinates = weighted_coordinates + p * heatmaps[f, 0, p[0], p[1]].numpy()
+                normalization = normalization + heatmaps[f, 0, p[0], p[1]]
+            weighted_coordinates = weighted_coordinates / normalization
+
+            tracks[f, :] = weighted_coordinates
+            
+            tracks = tracks
+
+        return torch.from_numpy(tracks)
 
     def place_marker_in_frames(self, frames, tracks, safe_as_gif=True):
         """
@@ -43,6 +77,9 @@ class ZeroShotTracker:
         """
 
         tracks = tracks.to("cpu").numpy()
+
+        # Round coordinates to int in case they are float for some reason
+        tracks = np.rint(tracks).astype(int)
 
         frames_marked = frames
         for i in range(tracks.shape[0]):

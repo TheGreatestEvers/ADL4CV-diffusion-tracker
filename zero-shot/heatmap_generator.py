@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 import math
+from PIL import Image, ImageSequence
+from zero_shot_tracker import ZeroShotTracker
 
 class HeatmapGenerator:
     """
@@ -10,39 +12,101 @@ class HeatmapGenerator:
     def __init__(self) -> None:
         ...
     
-    def generate(self, feature_maps, target_coordinates):
+    def generate(self, feature_maps, target_coordinates, mode="keep_feat_vec"):
         """
         Generates Heatmaps.
 
         Args:
             features_maps: Tensor with concatenation of feature maps. Dimension: [Frames, Height, Width, Channels]
             target_coordinates: Tuple with coordinates of point to track. Format: (y, x, time)
+            mode: Either "keep_feat_vec" or "resample_feat_vec". First uses feature vector from inital point to generate heatmaps for all
+                  frames latter, latter resamples features vector after each point estimation 
 
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [Frames, Height, Width]
         """
+
+        if feature_maps.shape[-1] == feature_maps.shape[-2]:
+            feature_maps = feature_maps.permute(0, 2, 3, 1)
+
+        if feature_maps.dtype != torch.float32:
+            feature_maps = feature_maps.float()
         
-        point_proj = self.__project_point_coordinates(target_coordinates)
-        print("projected point: ")
-        print(point_proj)
-
-        target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
-        print("sample feat vec")
-        print(target_feat_vec)
-
         F, H, W, C = feature_maps.shape
-
-        target_feat_vec = target_feat_vec.view(1, 1, 1, -1)  
-        target_feat_vec = target_feat_vec.expand(F, H, W, C)
         
-        # Create heatmaps using cosine-similarity
-        norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
-        norm_feat_vecs = torch.norm(feature_maps, dim=-1, keepdim=True)
+        if mode == "keep_feat_vec":
+            point_proj = self.__project_point_coordinates(target_coordinates)
 
-        heatmaps = torch.sum(feature_maps * target_feat_vec, dim=-1, keepdim=True) 
-        heatmaps = heatmaps / (norm_target_feat_vec * norm_feat_vecs)
+            target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
+
+            target_feat_vec = target_feat_vec.view(1, 1, 1, -1)  
+            target_feat_vec = target_feat_vec.expand(F, H, W, C)
+            
+            # Create heatmaps using cosine-similarity
+            norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
+            norm_feat_vecs = torch.norm(feature_maps, dim=-1, keepdim=True)
+
+            heatmaps = torch.sum(feature_maps * target_feat_vec, dim=-1, keepdim=True) 
+            heatmaps = heatmaps / (norm_target_feat_vec * norm_feat_vecs)
+
+        elif mode == "resample_feat_vec": # Not working
+
+            tracker = ZeroShotTracker()
+            heatmaps = torch.zeros(F, 32, 32, 1)
+            for t in range(F):
+                point_proj = self.__project_point_coordinates(target_coordinates)
+
+                target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
+
+                feat_map = feature_maps[t]
+
+                target_feat_vec = target_feat_vec.view(1, 1, -1)  
+                target_feat_vec = target_feat_vec.expand(H, W, C)
+
+                norm_target_feat_vec = torch.norm(target_feat_vec, dim=-1, keepdim=True)
+                norm_feat_vecs = torch.norm(feat_map, dim=-1, keepdim=True)
+
+                heatmap = torch.sum(feat_map * target_feat_vec, dim=-1, keepdim=True) 
+                heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
+
+                heatmap = heatmap.unsqueeze(0)
+
+                track_estimation = tracker.track(heatmap)[0]
+
+                target_coordinates = (track_estimation[0], track_estimation[1], t)
+
+                heatmaps[t] = heatmap[0]
+
+        else:
+            raise ValueError("Mode has to be either keep_feat_vec or resample_feat_vec.")
+
 
         return heatmaps
+    
+    def safe_heatmap_as_gif(self, heatmaps, scaled=True, spatial_input_space=256):
+        """
+        Safe generated heatmaps as gif.
+
+        Args:
+            heatmaps: Heatmaps tensor with Dimension: [Frames, Height, Width, 1]
+            scaled: Determines whether to also safe scaled heatmaps
+            spatial_input_space: Spatial size of image space
+        """
+
+        heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)) * 255
+        
+        if scaled:
+            heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)
+            heatmaps_scaled = heatmaps_scaled.to("cpu").squeeze().numpy()
+        
+        heatmaps = heatmaps.to("cpu").squeeze().numpy()
+        
+        frames_gif = [Image.fromarray(f) for f in heatmaps]
+        frames_gif[0].save("output/heatmaps.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
+
+        if scaled:
+            frames_gif = [Image.fromarray(f) for f in heatmaps_scaled]
+            frames_gif[0].save("output/heatmaps_scaled.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
 
     def __project_point_coordinates(self, point_input_space, spatial_input_space=256, spatial_latent_space=32):
         """
