@@ -35,14 +35,40 @@ class DiffusionWrapper:
         #self.text_encoder = self.text_encoder.to(self.device)
         #self.unet = self.unet.to(self.device)
 
-        self.feature_maps = []
+        self.feature_maps = {'up_block': [], 'down_block': [], 'mid_block': []}
         self.hooks = []
 
-        def hook_feat_map(mod, inp, out):
-            self.feature_maps.append(out)
+        def hook_feat_map_up(mod, inp, out):
+            self.feature_maps['up_block'].append(out.cpu())
+        def hook_feat_map_down(mod, inp, out):
+            self.feature_maps['down_block'].append(out[0].cpu())
+        def hook_feat_map_mid(mod, inp, out):
+            self.feature_maps['mid_block'].append(out.cpu())
 
         for up_block in self.unet.up_blocks:
-            self.hooks.append(up_block.register_forward_hook(hook_feat_map))
+            self.hooks.append(up_block.register_forward_hook(hook_feat_map_up))
+        for down_block in self.unet.down_blocks:
+            self.hooks.append(down_block.register_forward_hook(hook_feat_map_down))
+        self.hooks.append(self.unet.mid_block.register_forward_hook(hook_feat_map_mid))
+
+    def concatenate_video_features(self, features):
+        """
+        Concatenates video feature tensors after resizing them to a uniform size.
+
+        Args:
+            features (dict): A dictionary containing feature maps. The dictionary keys can be considered as feature names
+                            and the values are lists of feature tensors.
+
+        Returns:
+            torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
+        """
+
+        max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
+
+        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for fts in features.values() for ft in fts], dim=1)
+        
+        return feature_map
+
 
 
     def extract_video_features(
@@ -51,14 +77,16 @@ class DiffusionWrapper:
             prompt: str = ""
     ):
         """
-        Extract video diffusion features from a heatmap.
+        Extract video diffusion features from a video tensor or a video file.
 
         Args:
-            video: torch.Tensor (BxFxHxWxC) | str path to video file
-            prompt: caption for text-to-video diffusion
+            video: A video input which can be either:
+                - A torch.Tensor of shape (BxFxHxWxC)
+                - A string path to a video file.
+            prompt: A caption or text prompt for text-to-video diffusion.
 
         Returns:
-            feature map tensor (BxFxC_fxH/8xW/8)
+            feature_map: A dictionary of feature map tensors, where each key corresponds to a different level of extracted features.
         """
 
         if isinstance(video, str):
@@ -88,24 +116,18 @@ class DiffusionWrapper:
         noise = torch.randn(latent_video.shape, dtype=torch.float16, device=self.device)
         latent_video = self.scheduler.add_noise(latent_video, noise, torch.tensor(1, device=self.device))
 
-        self.feature_maps.clear()
+        for key in self.feature_maps.keys():
+            self.feature_maps[key].clear()
 
         with torch.no_grad():
             self.unet(latent_video.permute(0, 2, 1, 3, 4), torch.tensor(1, device=self.device), encoder_hidden_states=text_embeddings).sample
 
-        max_height_width = 0
-        for feature_map in self.feature_maps:
-            max_height_width = feature_map.shape[-1] if max_height_width < feature_map.shape[-1] else max_height_width
-
-        adj_feature_map = torch.cat([functional.resize(feature_map, [max_height_width]*2) for feature_map in self.feature_maps], dim=1)
-        _, FC, FH, FW = adj_feature_map.shape
-        adj_feature_map = adj_feature_map.view(B, F, FC, FH, FW)
-
-        return adj_feature_map
+        return self.feature_maps
 
 
 if __name__ == '__main__':
     diffusion_wrapper = DiffusionWrapper()
-    feature_map = diffusion_wrapper.extract_video_features('rocket256.gif', 'A rocket starting on Mars')
+    feature_dict = diffusion_wrapper.extract_video_features('rocket256.gif', 'A rocket starting on Mars')
+    feature_map = diffusion_wrapper.concatenate_video_features(feature_dict)
+
     print(feature_map.shape)
-        
