@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import math
 from PIL import Image, ImageSequence
-from zero_shot_tracker import ZeroShotTracker
+from algorithms.zero_shot_tracker import ZeroShotTracker
 
 class HeatmapGenerator:
     """

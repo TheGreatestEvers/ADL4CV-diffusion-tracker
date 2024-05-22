@@ -6,7 +6,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet3DConditionModel, DDIMScheduler
 from diffusers import DiffusionPipeline
 
-from utils import load_video
+from algorithms.utils import load_video
 
 class DiffusionWrapper:
     def __init__(
