@@ -1,7 +1,6 @@
 import os
 import gc
 import torch
-import torchvision.transforms.functional as functional
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet3DConditionModel, DDIMScheduler
 from diffusers import DiffusionPipeline
@@ -52,26 +51,6 @@ class DiffusionWrapper:
         for down_block in self.unet.down_blocks:
             self.hooks.append(down_block.register_forward_hook(hook_feat_map_down))
         self.hooks.append(self.unet.mid_block.register_forward_hook(hook_feat_map_mid))
-
-    def concatenate_video_features(self, features):
-        """
-        Concatenates video feature tensors after resizing them to a uniform size.
-
-        Args:
-            features (dict): A dictionary containing feature maps. The dictionary keys can be considered as feature names
-                            and the values are lists of feature tensors.
-
-        Returns:
-            torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
-        """
-
-        max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
-
-        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for fts in features.values() for ft in fts], dim=1)
-        
-        return feature_map
-
-
 
     def extract_video_features(
             self,
@@ -129,7 +108,6 @@ class DiffusionWrapper:
         gc.collect()
 
         return self.feature_maps
-
 
 if __name__ == '__main__':
     diffusion_wrapper = DiffusionWrapper()

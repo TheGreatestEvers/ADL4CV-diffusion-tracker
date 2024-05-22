@@ -2,7 +2,7 @@ import os
 import torch
 import pickle
 import copy
-
+import torchvision.transforms.functional as functional
 from torch.utils.data import Dataset
 
 from algorithms.diffusion_wrapper import DiffusionWrapper
@@ -75,6 +75,24 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
             pickle.dump(dataset_with_features, dataset_feature_file)
 
             dataset_feature_file.close()
+
+def concatenate_video_features(features):
+    """
+    Concatenates video feature tensors after resizing them to a uniform size.
+
+    Args:
+        features: A dictionary containing feature maps. The dictionary keys can be considered as feature names
+                        and the values are lists of feature tensors.
+
+    Returns:
+        torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
+    """
+
+    max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
+
+    feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for fts in features.values() for ft in fts], dim=1)
+    
+    return feature_map
 
 
 if __name__ == '__main__':
