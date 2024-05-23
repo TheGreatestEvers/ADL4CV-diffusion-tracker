@@ -136,7 +136,7 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             # Draw the marker as a filled circle
             draw.ellipse((x-4, y-4, x+4, y+4), fill=(255, 0, 0))
 
-            if ground_truth_tracks:
+            if ground_truth_tracks != None:
                 y_gt, x_gt = ground_truth_tracks[i]
                 draw.ellipse((x_gt-4, y_gt-4, x_gt+4, y_gt+4), fill=(0, 255, 0))
 
