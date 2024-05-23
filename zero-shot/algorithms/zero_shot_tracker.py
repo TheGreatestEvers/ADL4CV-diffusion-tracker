@@ -23,7 +23,7 @@ class ZeroShotTracker:
 
         # Scale heatmap from latent spatials to image spatials
         heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)).to("cpu")
-        heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
+        #heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
 
         F, _, H, W = heatmaps.shape
 
@@ -60,7 +60,7 @@ class ZeroShotTracker:
 
             tracks[f, :] = weighted_coordinates
             
-            tracks = tracks
+        tracks = tracks * 8
 
         return torch.from_numpy(tracks)
 
