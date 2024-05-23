@@ -42,7 +42,7 @@ class FeatureDataset(Dataset):
     def __getitem__(self, idx):
         return self.datasets[idx]
 
-def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffustion_model_path: str = './text-to-video-ms-1.7b'):
+def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffusion_model_path: str = './text-to-video-ms-1.7b'):
     """
     Extract and save video diffusion features from input datasets.
 
@@ -54,7 +54,7 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
 
     datasets = {}
     
-    diffusion_wrapper = DiffusionWrapper(diffustion_model_path)
+    diffusion_wrapper = DiffusionWrapper(diffusion_model_path)
     
     if 'davis' in input_dataset_paths.keys():
         datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])
@@ -96,4 +96,4 @@ def concatenate_video_features(features):
 
 
 if __name__ == '__main__':
-    extract_diffusion_features(input_dataset_paths={'davis': '/tapvid_davis/tapvid_davis.pkl'}, diffustion_model_path='../text-to-video-ms-1.7b/')
+    extract_diffusion_features(input_dataset_paths={'davis': '/tapvid_davis/tapvid_davis.pkl'}, diffusion_model_path='../text-to-video-ms-1.7b/')
