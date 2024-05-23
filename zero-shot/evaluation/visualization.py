@@ -1,5 +1,5 @@
 import torch
-from PIL import Image, ImageSequence
+from PIL import Image, ImageSequence, ImageDraw
 import numpy as np
 import matplotlib.pyplot as plt
 import io
@@ -108,6 +108,8 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
         Args:
             frames: Video frames (numpy array) with Dimensions: [Frames, Height, Width, 3]
             tracks: Estimated location of point in each frame (tensor). Dimensions: [Frames, 2]
+            safe_as_gif: Wether frames should be saved as gif
+            ground_truth_tracks: Ground truth tracks (numpy array). If not None, green marker will be placed at GT location
 
         Returns:
             frames_marked: Marked frames (numpy array) with Dimensions: [Frames, Height, Width, 3]
@@ -123,33 +125,24 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
         # Round coordinates to int in case they are float for some reason
         tracks = np.rint(tracks).astype(int)
 
-        frames_marked = frames
-        for i in range(tracks.shape[0]):
+        marked_frames = []
+        for i, frame in enumerate(frames):
+            frame_image = Image.fromarray(frame.astype('uint8'))
+            draw = ImageDraw.Draw(frame_image)
+            
+            # Get the coordinates for the marker from indices
             y, x = tracks[i]
-            frames_marked[i, y, x] = [255, 0, 0]
-            frames_marked[i, y+1, x] = [255, 0, 0]
-            frames_marked[i, y-1, x] = [255, 0, 0]
-            frames_marked[i, y, x+1] = [255, 0, 0]
-            frames_marked[i, y, x-1] = [255, 0, 0]
-            frames_marked[i, y+1, x+1] = [255, 0, 0]
-            frames_marked[i, y+1, x-1] = [255, 0, 0]
-            frames_marked[i, y-1, x+1] = [255, 0, 0]
-            frames_marked[i, y-1, x-1] = [255, 0, 0]
+            
+            # Draw the marker as a filled circle
+            draw.ellipse((x-4, y-4, x+4, y+4), fill=(255, 0, 0))
 
-        if ground_truth_tracks:
-            for i in range(ground_truth_tracks.shape[0]):
-                y, x = ground_truth_tracks[i]
-                frames_marked[i, y, x] = [0, 255, 0]
-                frames_marked[i, y+1, x] = [0, 255, 0]
-                frames_marked[i, y-1, x] = [0, 255, 0]
-                frames_marked[i, y, x+1] = [0, 255, 0]
-                frames_marked[i, y, x-1] = [0, 255, 0]
-                frames_marked[i, y+1, x+1] = [0, 255, 0]
-                frames_marked[i, y+1, x-1] = [0, 255, 0]
-                frames_marked[i, y-1, x+1] = [0, 255, 0]
-                frames_marked[i, y-1, x-1] = [0, 255, 0]
-        
+            if ground_truth_tracks:
+                y_gt, x_gt = ground_truth_tracks[i]
+                draw.ellipse((x_gt-4, y_gt-4, x_gt+4, y_gt+4), fill=(0, 255, 0))
+
+            
+            # Append the modified frame to the list
+            marked_frames.append(np.array(frame_image))
 
         if safe_as_gif:
-            frames_gif = [Image.fromarray(f) for f in frames_marked]
-            frames_gif[0].save("output/marked_frames.gif", save_all=True, append_images=frames_gif[1:], duration=200, loop=0)
+            imageio.mimsave('output/marked_frames.gif', marked_frames, fps=15, loop=0)
