@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 import math
-from PIL import Image, ImageSequence
 from algorithms.zero_shot_tracker import ZeroShotTracker
 
 class HeatmapGenerator:
@@ -73,7 +72,7 @@ class HeatmapGenerator:
 
                 track_estimation = tracker.track(heatmap)[0]
 
-                target_coordinates = (track_estimation[0], track_estimation[1], t)
+                target_coordinates = (track_estimation[0].numpy(), track_estimation[1].numpy(), t+1)
 
                 heatmaps[t] = heatmap[0]
 
@@ -82,31 +81,6 @@ class HeatmapGenerator:
 
 
         return heatmaps
-    
-    def safe_heatmap_as_gif(self, heatmaps, scaled=True, spatial_input_space=256):
-        """
-        Safe generated heatmaps as gif.
-
-        Args:
-            heatmaps: Heatmaps tensor with Dimension: [Frames, Height, Width, 1]
-            scaled: Determines whether to also safe scaled heatmaps
-            spatial_input_space: Spatial size of image space
-        """
-
-        heatmaps = torch.permute(heatmaps, (0, 3, 1, 2)) * 255
-        
-        if scaled:
-            heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)
-            heatmaps_scaled = heatmaps_scaled.to("cpu").squeeze().numpy()
-        
-        heatmaps = heatmaps.to("cpu").squeeze().numpy()
-        
-        frames_gif = [Image.fromarray(f) for f in heatmaps]
-        frames_gif[0].save("output/heatmaps.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
-
-        if scaled:
-            frames_gif = [Image.fromarray(f) for f in heatmaps_scaled]
-            frames_gif[0].save("output/heatmaps_scaled.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
 
     def __project_point_coordinates(self, point_input_space, spatial_input_space=256, spatial_latent_space=32):
         """
