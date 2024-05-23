@@ -1,3 +1,4 @@
+import os
 import torch
 from PIL import Image, ImageSequence, ImageDraw
 import numpy as np
@@ -31,7 +32,7 @@ def array_to_heatmap(data_slice):
     return heatmap_image
 
 
-def blend_images(heatmap_img, video_frame, alpha=0.35):
+def blend_images(heatmap_img, video_frame, alpha=0.6):
     """
     Blends the heatmap image with the video frame using the given alpha transparency.
 
@@ -51,7 +52,7 @@ def blend_images(heatmap_img, video_frame, alpha=0.35):
     return blended_img
 
 
-def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True, spatial_input_space=256):
+def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True, spatial_input_space=256, folder_path='output'):
     """
     Safe heatmaps as colorful gif.
 
@@ -87,7 +88,7 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
     # plt.show()
 
     frames_gif = [array_to_heatmap(h) for h in heatmaps]
-    imageio.mimsave('output/heatmaps.gif', frames_gif, fps=15, loop=0)
+    imageio.mimsave(os.path.join(folder_path, 'heatmaps.gif'), frames_gif, fps=15, loop=0)
     #frames_gif[0].save("../output/heatmaps.gif", save_all=True, append_images=frames_gif[1:], duration=100, loop=0)
 
     if scaled:
@@ -98,10 +99,10 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
             frames_gif = [blend_images(array_to_heatmap(h), f) for h, f in zip(heatmaps_scaled, frames)]
         else:
             frames_gif = [array_to_heatmap(h) for h in heatmaps_scaled]
-        imageio.mimsave('output/heatmaps_scaled.gif', frames_gif, fps=15, loop=0)
+        imageio.mimsave(os.path.join(folder_path, 'scaled_heatmaps.gif'), frames_gif, fps=15, loop=0)
 
 
-def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks=None):
+def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks=None, folder_path='output'):
         """
         Add red marker to frames at estimated point location.
 
@@ -136,7 +137,7 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             # Draw the marker as a filled circle
             draw.ellipse((x-4, y-4, x+4, y+4), fill=(255, 0, 0))
 
-            if ground_truth_tracks != None:
+            if ground_truth_tracks is not None:
                 y_gt, x_gt = ground_truth_tracks[i]
                 draw.ellipse((x_gt-4, y_gt-4, x_gt+4, y_gt+4), fill=(0, 255, 0))
 
@@ -145,4 +146,4 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             marked_frames.append(np.array(frame_image))
 
         if safe_as_gif:
-            imageio.mimsave('output/marked_frames.gif', marked_frames, fps=15, loop=0)
+            imageio.mimsave(os.path.join(folder_path, 'marked_frames.gif'), marked_frames, fps=15, loop=0)

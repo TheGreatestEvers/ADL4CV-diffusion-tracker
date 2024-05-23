@@ -6,3 +6,4 @@ mediapy
 av
 tensorflow
 tensorflow_datasets
+imageio
