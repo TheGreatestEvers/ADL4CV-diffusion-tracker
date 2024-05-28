@@ -4,9 +4,12 @@ import pickle
 import copy
 import torchvision.transforms.functional as functional
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from algorithms.diffusion_wrapper import DiffusionWrapper
 from evaluation.evaluation_datasets import create_davis_dataset
+
+from sklearn.decomposition import PCA
 
 def feature_collate_fn(batch):
     """Custom collate function that returns the input batch as is, which is a list of dictionaries."""
@@ -41,8 +44,25 @@ class FeatureDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.datasets[idx]
+    
+def restrict_frame_size_to(video_feature_tensor: torch.Tensor, max_frame_size: int = 2 ** 20):
+    F, C, H, W = video_feature_tensor.shape
 
-def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffusion_model_path: str = './text-to-video-ms-1.7b'):
+    reduction_factor = max_frame_size / (C * H * W)
+
+    if reduction_factor < 1:
+        C_n = int(reduction_factor * C)
+
+        flattened_features = video_feature_tensor.view(F * H * W, C).numpy()
+
+        pca = PCA(n_components=C_n)
+        transformed_features = pca.fit_transform(flattened_features)
+
+        video_feature_tensor = torch.from_numpy(transformed_features).reshape(F, C_n, H, W)
+
+    return video_feature_tensor
+
+def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffusion_model_path: str = './text-to-video-ms-1.7b', restrict_frame_size: bool = False, max_frame_size: int = 2 ** 20):
     """
     Extract and save video diffusion features from input datasets.
 
@@ -63,11 +83,18 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
         with open(os.path.join(output_dataset_path, dataset_name + '.pkl'), 'wb') as dataset_feature_file:
             dataset_with_features = []
 
-            for data in dataset_values:
+            print('Dataset: ' + dataset_name)
+
+            for data in tqdm(dataset_values, desc="Progress: ", unit="%"):
                 data_with_features_dict = data[dataset_name]
 
                 video_tensor = torch.tensor(data_with_features_dict['video'])
                 video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "")
+
+                if restrict_frame_size:
+                    for vfk, vfvs in video_features_dict.items():
+                        for idx, vfv in enumerate(vfvs):
+                            video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size)
 
                 data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
                 dataset_with_features.append(data_with_features_dict)

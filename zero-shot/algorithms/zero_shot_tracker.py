@@ -27,6 +27,8 @@ class ZeroShotTracker:
 
         F, _, H, W = heatmaps.shape
 
+        scaling_factor = image_spatial_size / H
+
         # Get max coordinates for each frame 
         max_coordinates = torch.stack([(heatmaps[i,0]==torch.max(heatmaps[i,0])).nonzero()[0] for i in range(F)], dim=0).squeeze()
         
@@ -60,7 +62,7 @@ class ZeroShotTracker:
 
             tracks[f, :] = weighted_coordinates
             
-        tracks = tracks * 8
+        tracks = tracks * scaling_factor
 
         return torch.from_numpy(tracks)
 
