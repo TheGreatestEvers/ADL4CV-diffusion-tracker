@@ -62,7 +62,15 @@ def restrict_frame_size_to(video_feature_tensor: torch.Tensor, max_frame_size: i
 
     return video_feature_tensor
 
-def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffusion_model_path: str = './text-to-video-ms-1.7b', restrict_frame_size: bool = False, max_frame_size: int = 2 ** 20):
+def extract_diffusion_features(
+        input_dataset_paths: dict, 
+        output_dataset_path: str = 'output/features/', 
+        diffusion_model_path: str = './text-to-video-ms-1.7b', 
+        restrict_frame_size: bool = False, 
+        max_frame_size: int = 2 ** 20,
+        enable_vae_slicing: bool = True,
+        use_decoder_features: bool = True
+        ):
     """
     Extract and save video diffusion features from input datasets.
 
@@ -74,7 +82,7 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
 
     datasets = {}
     
-    diffusion_wrapper = DiffusionWrapper(diffusion_model_path)
+    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=enable_vae_slicing)
     
     if 'davis' in input_dataset_paths.keys():
         datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])
@@ -89,7 +97,7 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
                 data_with_features_dict = data[dataset_name]
 
                 video_tensor = torch.tensor(data_with_features_dict['video'])
-                video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "")
+                video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "", use_decoder_features=use_decoder_features)
 
                 if restrict_frame_size:
                     for vfk, vfvs in video_features_dict.items():

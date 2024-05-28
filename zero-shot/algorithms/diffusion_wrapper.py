@@ -11,7 +11,6 @@ class DiffusionWrapper:
     def __init__(
             self,
             model_path: str = './text-to-video-ms-1.7b',
-            use_decoder_features: bool = True,
             enable_vae_slicing: bool = True
     ):
         
@@ -31,8 +30,6 @@ class DiffusionWrapper:
 
         self.num_inference_steps = 25
         self.scaling_factor = 0.18215
-
-        self.use_decoder_features = use_decoder_features
 
         #self.vae = AutoencoderKL.from_pretrained(self.model_path, subfolder="vae", use_safetensor=True)
         #self.tokenizer = CLIPTokenizer.from_pretrained(self.model_path, subfolder="tokenizer")
@@ -74,7 +71,8 @@ class DiffusionWrapper:
     def extract_video_features(
             self,
             video: torch.Tensor | str,
-            prompt: str = ""
+            prompt: str = "",
+            use_decoder_features: bool = True
     ):
         """
         Extract video diffusion features from a video tensor or a video file.
@@ -127,7 +125,7 @@ class DiffusionWrapper:
 
             noise_pred = self.unet(latent_video, last_scheduler_step, encoder_hidden_states=text_embeddings).sample
 
-            if self.use_decoder_features:
+            if use_decoder_features:
                 latent_video = self.scheduler.step(noise_pred, last_scheduler_step, latent_video).prev_sample
                 latent_video = latent_video.permute(0, 2, 1, 3, 4) #B, F, LC, LH, LW
                 latent_video = latent_video.view(B*F, LC, LH, LW)
