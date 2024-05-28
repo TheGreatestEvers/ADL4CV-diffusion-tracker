@@ -2,6 +2,7 @@ import os
 import torch
 import pickle
 import copy
+import gc
 import torchvision.transforms.functional as functional
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -89,7 +90,8 @@ def extract_diffusion_features(
 
     for dataset_name, dataset_values in datasets.items():
         with open(os.path.join(output_dataset_path, dataset_name + '.pkl'), 'wb') as dataset_feature_file:
-            dataset_with_features = []
+            pass
+        with open(os.path.join(output_dataset_path, dataset_name + '.pkl'), 'ab') as dataset_feature_file:
 
             print('Dataset: ' + dataset_name)
 
@@ -105,9 +107,11 @@ def extract_diffusion_features(
                             video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size)
 
                 data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
-                dataset_with_features.append(data_with_features_dict)
             
-            pickle.dump(dataset_with_features, dataset_feature_file)
+                pickle.dump(data_with_features_dict, dataset_feature_file)
+
+                del data_with_features_dict, video_features_dict
+                gc.collect()
 
             dataset_feature_file.close()
 
