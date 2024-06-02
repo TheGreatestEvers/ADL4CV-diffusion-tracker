@@ -49,12 +49,20 @@ class FeatureDataset(Dataset):
 def do_pca(feature_tensor: torch.Tensor, n_components: int):
     F, C, H, W = feature_tensor.shape
 
-    flattened_features = feature_tensor.view(F * H * W, C).numpy()
+    # Flatten the spatial dimensions, but keep the channel dimension
+    flattened_features = feature_tensor.permute(0, 2, 3, 1).reshape(-1, C).numpy()
 
+    # Perform PCA on the channel dimension
     pca = PCA(n_components=n_components)
     transformed_features = pca.fit_transform(flattened_features)
 
-    return torch.from_numpy(transformed_features).view(F, H, W, n_components).permute(0, 3, 1, 2)
+    # Reshape back to the original structure, but with the new number of components
+    transformed_features = torch.from_numpy(transformed_features).view(F, H, W, n_components)
+
+    # Permute to match the original tensor format (F, C, H, W)
+    transformed_features = transformed_features.permute(0, 3, 1, 2)
+
+    return transformed_features
 
     
 def restrict_frame_size_to(video_feature_tensor: torch.Tensor, max_frame_size: int = 2 ** 20):
