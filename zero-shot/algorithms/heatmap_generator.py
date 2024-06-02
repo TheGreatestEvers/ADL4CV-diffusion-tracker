@@ -36,7 +36,8 @@ class HeatmapGenerator:
         N, _ = targets.shape
         
         if mode == "keep_feat_vec":
-            targets_proj = self.__project_point_coordinates(targets)
+
+            targets_proj = self.__project_point_coordinates(targets, spatial_latent_space=H)
 
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 

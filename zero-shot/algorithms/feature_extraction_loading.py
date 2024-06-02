@@ -2,11 +2,15 @@ import os
 import torch
 import pickle
 import copy
+import gc
 import torchvision.transforms.functional as functional
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from algorithms.diffusion_wrapper import DiffusionWrapper
 from evaluation.evaluation_datasets import create_davis_dataset
+
+from sklearn.decomposition import PCA
 
 def feature_collate_fn(batch):
     """Custom collate function that returns the input batch as is, which is a list of dictionaries."""
@@ -24,25 +28,55 @@ class FeatureDataset(Dataset):
     """
     def __init__(self, feature_dataset_path: str = 'output/features/'):
 
-        self.datasets = []
+        self.dataset_cnt = 0
+        self.feature_dataset_path = feature_dataset_path
 
         for file in os.listdir(feature_dataset_path):
-            if not file.endswith(".pkl"):
-                continue
-            
-            with open(os.path.join(feature_dataset_path, file), 'rb') as dataset_file:
-                dataset = pickle.load(dataset_file)
-                self.datasets.extend(dataset)
-
-                dataset_file.close()
+            if file.endswith(".pkl"):
+                self.dataset_cnt += 1
 
     def __len__(self):
-        return len(self.datasets)
+        return self.dataset_cnt
 
     def __getitem__(self, idx):
-        return self.datasets[idx]
+        dataset = {}
 
-def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: str = 'output/features/', diffusion_model_path: str = './text-to-video-ms-1.7b'):
+        with open(os.path.join(self.feature_dataset_path, 'video_' + str(idx) + '.pkl'), 'rb') as dataset_file:
+            dataset = pickle.load(dataset_file)
+
+        return dataset
+    
+def do_pca(feature_tensor: torch.Tensor, n_components: int):
+    F, C, H, W = feature_tensor.shape
+
+    flattened_features = feature_tensor.view(F * H * W, C).numpy()
+
+    pca = PCA(n_components=n_components)
+    transformed_features = pca.fit_transform(flattened_features)
+
+    return torch.from_numpy(transformed_features).view(F, H, W, n_components).permute(0, 3, 1, 2)
+
+    
+def restrict_frame_size_to(video_feature_tensor: torch.Tensor, max_frame_size: int = 2 ** 20):
+    F, C, H, W = video_feature_tensor.shape
+
+    reduction_factor = max_frame_size / (C * H * W)
+
+    if reduction_factor < 1:
+        C_n = int(reduction_factor * C)
+        video_feature_tensor = do_pca(video_feature_tensor, n_components=C_n)
+
+    return video_feature_tensor
+
+def extract_diffusion_features(
+        input_dataset_paths: dict, 
+        output_dataset_path: str = 'output/features/', 
+        diffusion_model_path: str = './text-to-video-ms-1.7b', 
+        restrict_frame_size: bool = False, 
+        max_frame_size: int = 2 ** 20,
+        enable_vae_slicing: bool = True,
+        use_decoder_features: bool = True
+        ):
     """
     Extract and save video diffusion features from input datasets.
 
@@ -54,29 +88,38 @@ def extract_diffusion_features(input_dataset_paths: dict, output_dataset_path: s
 
     datasets = {}
     
-    diffusion_wrapper = DiffusionWrapper(diffusion_model_path)
+    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=enable_vae_slicing)
     
     if 'davis' in input_dataset_paths.keys():
         datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])
 
     for dataset_name, dataset_values in datasets.items():
-        with open(os.path.join(output_dataset_path, dataset_name + '.pkl'), 'wb') as dataset_feature_file:
-            dataset_with_features = []
+        print('Dataset: ' + dataset_name)
 
-            for data in dataset_values:
-                data_with_features_dict = data[dataset_name]
+        os.makedirs(os.path.join(output_dataset_path, dataset_name), exist_ok=True)
 
-                video_tensor = torch.tensor(data_with_features_dict['video'])
-                video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "")
+        for data_idx, data in tqdm(enumerate(dataset_values), desc="Progress: "):
+            data_with_features_dict = data[dataset_name]
 
-                data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
-                dataset_with_features.append(data_with_features_dict)
-            
-            pickle.dump(dataset_with_features, dataset_feature_file)
+            video_tensor = torch.tensor(data_with_features_dict['video'])
+            video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "", use_decoder_features=use_decoder_features)
 
-            dataset_feature_file.close()
+            if restrict_frame_size:
+                for vfk, vfvs in video_features_dict.items():
+                    for idx, vfv in enumerate(vfvs):
+                        video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size)
+                    
+            data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
 
-def concatenate_video_features(features):
+            with open(os.path.join(output_dataset_path, dataset_name, 'video_' + str(data_idx)) + '.pkl', 'wb') as data_with_features_dict_file:
+                pickle.dump(data_with_features_dict, data_with_features_dict_file)
+
+                data_with_features_dict_file.close()
+
+            del data_with_features_dict, video_features_dict
+            gc.collect()
+
+def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10):
     """
     Concatenates video feature tensors after resizing them to a uniform size.
 
@@ -88,9 +131,18 @@ def concatenate_video_features(features):
         torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
     """
 
+    feature_maps = []
+
     max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
 
-    feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for fts in features.values() for ft in fts], dim=1)
+    if perform_pca:
+        for fts in features.values():
+            for ft in fts:
+                feature_maps.append(do_pca(ft, n_components))
+
+        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for ft in feature_maps], dim=1)
+    else:
+        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for fts in features.values() for ft in fts], dim=1)
     
     return feature_map
 

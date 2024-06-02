@@ -26,6 +26,8 @@ class ZeroShotTracker:
 
         heatmaps = heatmaps.squeeze()
         F, N, H, W = heatmaps.shape
+        
+        scaling_factor = image_spatial_size / H
 
         tracks = torch.zeros(N, F, 2).to(heatmaps.device)
         for n in range(N):
