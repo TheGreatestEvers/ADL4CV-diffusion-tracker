@@ -64,7 +64,9 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
         spatial_input_space: Spatial size of image space
     """
 
-    heatmaps = torch.permute(heatmaps, (0, 3, 1, 2))
+    
+    #heatmaps = torch.permute(heatmaps, (0, 3, 1, 2))
+    heatmaps = heatmaps[:,0,:,:,:]
     
     if scaled:
         heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)
@@ -108,7 +110,7 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
 
         Args:
             frames: Video frames (numpy array) with Dimensions: [Frames, Height, Width, 3]
-            tracks: Estimated location of point in each frame (tensor). Dimensions: [Frames, 2]
+            tracks: Estimated location of each point in each frame (tensor). Dimensions: [NumPoints, Frames, 2]
             safe_as_gif: Wether frames should be saved as gif
             ground_truth_tracks: Ground truth tracks (numpy array). If not None, green marker will be placed at GT location
 
@@ -122,6 +124,8 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             ...
         else:
             ValueError("Tracks has to be either tensor or numpy array.")
+        
+        N, F, _ = tracks.shape
 
         # Round coordinates to int in case they are float for some reason
         tracks = np.rint(tracks).astype(int)
@@ -131,17 +135,20 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             frame_image = Image.fromarray(frame.astype('uint8'))
             draw = ImageDraw.Draw(frame_image)
             
-            # Get the coordinates for the marker from indices
-            y, x = tracks[i]
-            
-            # Draw the marker as a filled circle
-            draw.ellipse((x-4, y-4, x+4, y+4), fill=(255, 0, 0))
+            for n in range(N):
+                # Get the coordinates for the marker from indices
+                y, x = tracks[n, i]
+                
+                # Draw the marker as a filled circle
+                draw.ellipse((x-2, y-2, x+2, y+2), fill=(255, 62, 150))
 
-            if ground_truth_tracks is not None:
-                y_gt, x_gt = ground_truth_tracks[i]
-                draw.ellipse((x_gt-4, y_gt-4, x_gt+4, y_gt+4), fill=(0, 255, 0))
+                if ground_truth_tracks is not None:
+                    if N != 1:
+                        ValueError("Show ground truth only possible when only one point is tracked.")
+                    y_gt, x_gt = ground_truth_tracks[i]
+                    draw.ellipse((x_gt-2, y_gt-2, x_gt+2, y_gt+2), fill=(0, 255, 0))
 
-            
+                
             # Append the modified frame to the list
             marked_frames.append(np.array(frame_image))
 
