@@ -158,7 +158,7 @@ def extract_diffusion_features(
             del data_with_features_dict, video_features_dict
             gc.collect()
 
-def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10):
+def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10, perform_pooling: bool = False):
     """
     Concatenates video feature tensors after resizing them to a uniform size.
 
@@ -170,6 +170,9 @@ def concatenate_video_features(features, perform_pca: bool = False, n_components
         torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
     """
 
+    if perform_pca == True and perform_pooling == True:
+        ValueError("Only either pooling or pca allowed.")
+
     feature_maps = []
 
     max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
@@ -178,6 +181,12 @@ def concatenate_video_features(features, perform_pca: bool = False, n_components
         for fts in features.values():
             for ft in fts:
                 feature_maps.append(do_pca(ft, n_components))
+
+        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for ft in feature_maps], dim=1)
+    elif perform_pooling:
+        for fts in features.values():
+            for ft in fts:
+                feature_maps.append(do_pooling(ft, mode="max"))
 
         feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for ft in feature_maps], dim=1)
     else:
