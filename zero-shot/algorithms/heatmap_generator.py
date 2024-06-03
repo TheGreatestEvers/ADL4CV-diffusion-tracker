@@ -25,6 +25,7 @@ class HeatmapGenerator:
         """
 
         feature_maps.to(device)
+        targets.to(device)
 
         if feature_maps.shape[-1] != feature_maps.shape[-2]:
             ValueError("Featuremaps should have dimensions [Frames, Channels, Height, Width]")

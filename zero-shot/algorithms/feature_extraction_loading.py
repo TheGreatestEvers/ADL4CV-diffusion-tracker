@@ -6,6 +6,7 @@ import gc
 import torchvision.transforms.functional as functional
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import torch.nn.functional as torchfunc
 
 from algorithms.diffusion_wrapper import DiffusionWrapper
 from evaluation.evaluation_datasets import create_davis_dataset
@@ -49,12 +50,50 @@ class FeatureDataset(Dataset):
 def do_pca(feature_tensor: torch.Tensor, n_components: int):
     F, C, H, W = feature_tensor.shape
 
-    flattened_features = feature_tensor.view(F * H * W, C).numpy()
+    # Flatten the spatial dimensions, but keep the channel dimension
+    flattened_features = feature_tensor.permute(0, 2, 3, 1).reshape(-1, C).numpy()
 
+    # Perform PCA on the channel dimension
     pca = PCA(n_components=n_components)
     transformed_features = pca.fit_transform(flattened_features)
 
-    return torch.from_numpy(transformed_features).view(F, H, W, n_components).permute(0, 3, 1, 2)
+    # Reshape back to the original structure, but with the new number of components
+    transformed_features = torch.from_numpy(transformed_features).view(F, H, W, n_components)
+
+    # Permute to match the original tensor format (F, C, H, W)
+    transformed_features = transformed_features.permute(0, 3, 1, 2)
+
+    return transformed_features
+
+def do_pooling(feature_tensor: torch.Tensor, kernel_size= 4, stride=4, mode="max"):
+    """
+    Perform pooling along channel dimension of feature_tensor
+    """
+    F, C, H, W = feature_tensor.shape
+
+    if mode != "max" and mode != "avg":
+        ValueError("Mode has to either be max or avg.")
+
+    # Reshape to apply max pooling over the channel dimension
+    feat_tensor_reshaped = feature_tensor.permute(0, 2, 3, 1).contiguous()  # shape: F x H x W x C
+    feat_tensor_reshaped = feat_tensor_reshaped.view(-1, C)  # shape: (F*H*W) x C
+
+    # Calculate necessary padding
+    padding_needed = (stride - (C % stride)) % stride
+
+    if mode == "max":
+        # Apply 1D max pooling
+        tensor_pooled = torchfunc.max_pool1d(feat_tensor_reshaped.unsqueeze(1), kernel_size=kernel_size, stride=stride, padding=padding_needed).squeeze(1)  # shape: (F*H*W) x (C//stride)
+    else:
+        # Apply 1D avg pooling
+        tensor_pooled = torchfunc.avg_pool1d(feat_tensor_reshaped.unsqueeze(1), kernel_size=kernel_size, stride=stride, padding=padding_needed).squeeze(1)  # shape: (F*H*W) x (C//stride)
+
+    # Reshape the tensor back to the original spatial dimensions
+    C_new = tensor_pooled.shape[1]
+    tensor_pooled = tensor_pooled.view(F, H, W, C_new)  # shape: F x H x W x (C//stride)
+    tensor_pooled = tensor_pooled.permute(0, 3, 1, 2).contiguous()  # shape: F x (C//stride) x H x W
+
+    return tensor_pooled
 
     
 def restrict_frame_size_to(video_feature_tensor: torch.Tensor, max_frame_size: int = 2 ** 20):
@@ -119,7 +158,7 @@ def extract_diffusion_features(
             del data_with_features_dict, video_features_dict
             gc.collect()
 
-def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10):
+def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10, perform_pooling: bool = False):
     """
     Concatenates video feature tensors after resizing them to a uniform size.
 
@@ -131,6 +170,9 @@ def concatenate_video_features(features, perform_pca: bool = False, n_components
         torch.Tensor: A single concatenated feature map tensor of shape (BxFxCfxHxW)
     """
 
+    if perform_pca == True and perform_pooling == True:
+        ValueError("Only either pooling or pca allowed.")
+
     feature_maps = []
 
     max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
@@ -139,6 +181,12 @@ def concatenate_video_features(features, perform_pca: bool = False, n_components
         for fts in features.values():
             for ft in fts:
                 feature_maps.append(do_pca(ft, n_components))
+
+        feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for ft in feature_maps], dim=1)
+    elif perform_pooling:
+        for fts in features.values():
+            for ft in fts:
+                feature_maps.append(do_pooling(ft, mode="max"))
 
         feature_map = torch.cat([functional.resize(ft, [max_height_width] * 2) for ft in feature_maps], dim=1)
     else:

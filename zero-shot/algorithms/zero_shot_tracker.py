@@ -24,7 +24,7 @@ class ZeroShotTracker:
         # Scale heatmap from latent spatials to image spatials
         #heatmaps = torch.nn.functional.interpolate(heatmaps, size=image_spatial_size, mode="bilinear", align_corners=True)
 
-        heatmaps = heatmaps.squeeze()
+        heatmaps = heatmaps[:, :, 0, :, :]
         F, N, H, W = heatmaps.shape
         
         scaling_factor = image_spatial_size / H
