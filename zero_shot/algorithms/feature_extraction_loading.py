@@ -173,7 +173,7 @@ def extract_diffusion_features(
             del data_with_features_dict, video_features_dict
             gc.collect()
 
-def concatenate_video_features(features, perform_pca: bool = False, n_components: int = 10, perform_pooling: bool = False):
+def concatenate_video_features(features, force_max_spatial: int = None, perform_pca: bool = False, n_components: int = 10, perform_pooling: bool = False):
     """
     Concatenates video feature tensors after resizing them to a uniform size.
 
@@ -190,7 +190,10 @@ def concatenate_video_features(features, perform_pca: bool = False, n_components
 
     feature_maps = []
 
-    max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
+    if force_max_spatial is None:
+        max_height_width = max(ft.shape[-1] for fts in features.values() for ft in fts)
+    else:
+        max_height_width = force_max_spatial
 
     if perform_pca:
         for fts in features.values():
