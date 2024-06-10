@@ -44,7 +44,7 @@ class ZeroShotTracker:
 
         N, F, H, W = heatmaps.shape
 
-        tracks = torch.zeros([N, F, 2])
+        tracks = torch.zeros([N, F, 2], device=heatmaps.device)
 
         for i, hmp in enumerate(heatmaps):
 
@@ -55,7 +55,7 @@ class ZeroShotTracker:
 
             # Compute argmax indices
             argmax_flat = torch.argmax(hmp_softmax.view(F, H*W), dim=1)
-            argmax_indices = torch.stack((argmax_flat // hmp.shape[-1], argmax_flat % hmp.shape[-1]), dim=-1)
+            argmax_indices = torch.stack((argmax_flat // hmp.shape[-1], argmax_flat % hmp.shape[-1]), dim=-1).to(heatmaps.device)
 
             # Get soft argmax indices
             tracks[i] = self.soft_argmax(hmp, argmax_indices)
@@ -109,8 +109,7 @@ class ZeroShotTracker:
         grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
         grid_y = grid_y.unsqueeze(0).expand(F, -1, -1)
         grid_x = grid_x.unsqueeze(0).expand(F, -1, -1)
-        grid = torch.stack((grid_y, grid_x), dim=-1)
-        grid.to(heatmap.device)
+        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
 
         # Generate mask of a circle of radius radius around the argmax
         mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)).to(torch.float32), dim=-1) <= self.argmax_radius # shape (B, H, W)

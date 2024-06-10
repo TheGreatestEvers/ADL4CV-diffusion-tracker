@@ -32,19 +32,23 @@ class ZeViPo():
         for i, data in enumerate(self.dataloader):
             data = data[0]
 
+            indices = torch.arange(0, 10, 1)
+
             feature_dict = data['features']
-            query_points = torch.cat([torch.tensor(p, device=device).unsqueeze(0) for p in data['query_points'][0]], dim=0)
-            gt_points = torch.tensor(data['target_points'][0][..., [1, 0]], device=device)
-            gt_occluded = torch.tensor(data['occluded'][0], dtype=bool, device=device)
+            query_points = torch.cat([torch.tensor(p, dtype=torch.float32, device=device).unsqueeze(0) for p in data['query_points'][0]], dim=0)[indices]
+            gt_points = torch.tensor(data['target_points'][0][..., [1, 0]], dtype=torch.float32, device=device)[indices]
+            visible = 1 - torch.tensor(data['occluded'][0], dtype=torch.float32, device=device)[indices]
 
             self.optimizer.zero_grad()
             pred_points = self.model(feature_dict, query_points)
             
             losses = self.loss_fn(gt_points, pred_points)
-            loss = torch.mean(losses & gt_occluded)
+            loss = torch.mean(losses * visible.unsqueeze(-1))
 
             loss.backward()
             self.optimizer.step()
+
+            print(loss.item())
 
             iteration = epoch_index * len(self.dataloader) + i + 1
             logger.add_scalar('Loss/train', loss.item(), iteration)

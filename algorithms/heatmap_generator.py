@@ -23,9 +23,8 @@ class HeatmapGenerator:
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [NumPoints, Frames, Height, Width]
         """
-
-        feature_maps.to(device)
-        targets.to(device)
+        feature_maps = feature_maps.to(dtype=torch.float32).to(device=device)
+        targets = targets.to(device)
 
         if feature_maps.shape[-1] != feature_maps.shape[-2]:
             ValueError("Featuremaps should have dimensions [Frames, Channels, Height, Width]")
