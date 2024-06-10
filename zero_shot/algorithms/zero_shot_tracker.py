@@ -27,6 +27,7 @@ class ZeroShotTracker:
     """
     
     def __init__(self) -> None:
+
         self.argmax_radius = 24
         self.softmax = torch.nn.Softmax(dim=-1)
 

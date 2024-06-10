@@ -42,6 +42,7 @@ class HeatmapGenerator:
 
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
+
             heatmaps = torch.zeros(N, F, H, W).to(device)
             for i, feat_vec in enumerate(targets_feat_vecs):
 
