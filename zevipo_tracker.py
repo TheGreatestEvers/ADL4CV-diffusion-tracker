@@ -1,6 +1,6 @@
 import os
 import yaml
-import wandb
+#import wandb
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -9,6 +9,7 @@ from algorithms.feature_extraction_loading import FeatureDataset
 from algorithms.utils import read_config_file, feature_collate_fn
 from evaluation.evaluation_datasets import compute_tapvid_metrics
 from torch.utils.tensorboard import SummaryWriter
+from learning_based.weighted_features_tracker import WeightedFeaturesTracker, WeightedHeatmapsTracker
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -20,10 +21,10 @@ class ZeViPo():
         self.dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
         self.dataloader = DataLoader(self.dataset, self.config['batch_size'], shuffle=True, collate_fn=feature_collate_fn)
 
-        self.model = None
+        self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"])
 
         self.loss_fn = torch.nn.HuberLoss(reduction='none')
-        #self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
 
         self.epochs = self.config['epochs']
 
@@ -82,10 +83,10 @@ class ZeViPo():
     def train(self):
 
         logger = SummaryWriter(log_dir=self.config['log_dir'])
-        wandb.init(entity=self.config['wandb']['entity'],
-                   project=self.config['wandb']['project'],
-                   sync_tensorboard=True,
-                   config=self.config)
+        # wandb.init(entity=self.config['wandb']['entity'],
+        #            project=self.config['wandb']['project'],
+        #            sync_tensorboard=True,
+        #            config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
@@ -99,7 +100,7 @@ class ZeViPo():
 
             logger.flush()
         
-        wandb.finish()
+        #wandb.finish()
 
 
 if __name__ == '__main__':

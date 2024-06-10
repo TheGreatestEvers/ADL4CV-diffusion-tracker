@@ -1,7 +1,7 @@
 import torch
-from ..zero_shot.algorithms.heatmap_generator import HeatmapGenerator
-from ..zero_shot.algorithms.zero_shot_tracker import ZeroShotTracker
-from ..zero_shot.algorithms.feature_extraction_loading import concatenate_video_features
+from algorithms.heatmap_generator import HeatmapGenerator
+from algorithms.zero_shot_tracker import ZeroShotTracker
+from algorithms.feature_extraction_loading import concatenate_video_features
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
