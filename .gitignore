@@ -177,3 +177,6 @@ video_*
 *.pkl
 
 davis
+
+logs
+wandb

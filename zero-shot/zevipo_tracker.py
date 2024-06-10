@@ -23,7 +23,7 @@ class ZeViPo():
         self.model = None
 
         self.loss_fn = torch.nn.HuberLoss(reduction='none')
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
+        #self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
 
         self.epochs = self.config['epochs']
 
@@ -103,7 +103,7 @@ class ZeViPo():
 
 
 if __name__ == '__main__':
-    tracker = ZeViPo('/configs/config.yml')
+    tracker = ZeViPo('configs/config.yml')
     tracker.train()
     
     print(tracker.eval_random())

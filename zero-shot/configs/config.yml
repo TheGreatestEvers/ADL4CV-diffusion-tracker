@@ -6,4 +6,4 @@ epochs: 100
 
 wandb:
   project: 'zevipo'
-  entity: 'adl4cv'
+  entity: 'maxis-organization'
