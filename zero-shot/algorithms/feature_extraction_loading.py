@@ -140,8 +140,15 @@ def extract_diffusion_features(
         for data_idx, data in tqdm(enumerate(dataset_values), desc="Progress: "):
             data_with_features_dict = data[dataset_name]
 
+            prompt = ""
+            with open(os.path.join('../tapvid_davis_prompts/', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
+                prompt = prompt_file.read()
+
+                prompt_file.close()
+            print(prompt)
+
             video_tensor = torch.tensor(data_with_features_dict['video'])
-            video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, "", use_decoder_features=use_decoder_features)
+            video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, prompt = prompt, use_decoder_features=use_decoder_features)
 
             if restrict_frame_size:
                 for vfk, vfvs in video_features_dict.items():

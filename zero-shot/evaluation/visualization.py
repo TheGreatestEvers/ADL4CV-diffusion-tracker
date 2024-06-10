@@ -104,7 +104,7 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
         imageio.mimsave(os.path.join(folder_path, 'scaled_heatmaps.gif'), frames_gif, fps=15, loop=0)
 
 
-def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks=None, folder_path='output'):
+def place_marker_in_frames(frames, tracks, occluded = None, safe_as_gif=True, ground_truth_tracks=None, folder_path='output'):
         """
         Add red marker to frames at estimated point location.
 
@@ -136,17 +136,18 @@ def place_marker_in_frames(frames, tracks, safe_as_gif=True, ground_truth_tracks
             draw = ImageDraw.Draw(frame_image)
             
             for n in range(N):
+                if ground_truth_tracks is not None and (occluded is None or not occluded[n, i]):
+                    if N != 1:
+                        ValueError("Show ground truth only possible when only one point is tracked.")
+                    y_gt, x_gt = ground_truth_tracks[i]
+                    draw.ellipse((x_gt-6, y_gt-6, x_gt+6, y_gt+6), fill=(0, 255, 0))
+
                 # Get the coordinates for the marker from indices
                 y, x = tracks[n, i]
                 
                 # Draw the marker as a filled circle
-                draw.ellipse((x-2, y-2, x+2, y+2), fill=(255, 62, 150))
-
-                if ground_truth_tracks is not None:
-                    if N != 1:
-                        ValueError("Show ground truth only possible when only one point is tracked.")
-                    y_gt, x_gt = ground_truth_tracks[i]
-                    draw.ellipse((x_gt-2, y_gt-2, x_gt+2, y_gt+2), fill=(0, 255, 0))
+                if occluded is None or not occluded[n, i]:
+                    draw.ellipse((x-6, y-6, x+6, y+6), fill=(0, 0, 255))
 
                 
             # Append the modified frame to the list

@@ -42,7 +42,7 @@ class ZeroShotTracker:
                 max_coordinates = max_coordinates.unsqueeze(0)
 
             # Calculate estimation as weighted sum of points in the vicinity (max dist of 2 using L1) of max coordinate
-            vicinity_distance = 2
+            vicinity_distance = int(H/16)
             track = torch.zeros((F, 2)).to(heatmaps.device)
 
             for f in range(F):

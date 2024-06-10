@@ -175,3 +175,5 @@ tapvid_davis
 video_*
 
 *.pkl
+
+davis
