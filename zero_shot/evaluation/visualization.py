@@ -57,7 +57,7 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
     Safe heatmaps as colorful gif.
 
     Args:
-        heatmaps: Heatmaps tensor with Dimension: [Frames, Height, Width, 1]
+        heatmaps: Heatmaps tensor with Dimension: [Frames, Height, Width]
         overlay_video: Whether heatmap should be transparent and og video is shown on top
         frames: Numpy array of video frames, Dimensions: [F, H, W, 3]
         scaled: Determines whether to also safe scaled heatmaps
@@ -66,7 +66,7 @@ def safe_heatmap_as_gif(heatmaps, overlay_video=False, frames=None, scaled=True,
 
     
     #heatmaps = torch.permute(heatmaps, (0, 3, 1, 2))
-    heatmaps = heatmaps[:,0,:,:,:]
+    heatmaps = heatmaps[0,:,:,:]
     
     if scaled:
         heatmaps_scaled = torch.nn.functional.interpolate(heatmaps, size=spatial_input_space, mode="bilinear", align_corners=True)

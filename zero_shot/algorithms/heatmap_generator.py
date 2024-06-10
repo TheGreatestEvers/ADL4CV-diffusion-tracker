@@ -21,7 +21,7 @@ class HeatmapGenerator:
                   frames latter, latter resamples features vector after each point estimation 
 
         Returns:
-            heatmaps: Tensor of Heatmaps. Dimension: [Frames, NumPoints, 1, Height, Width]
+            heatmaps: Tensor of Heatmaps. Dimension: [NumPoints, Frames, Height, Width]
         """
 
         feature_maps.to(device)
@@ -42,7 +42,7 @@ class HeatmapGenerator:
 
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
-            heatmaps = torch.zeros(F, N, 1, H, W).to(device)
+            heatmaps = torch.zeros(N, F, H, W).to(device)
             for i, feat_vec in enumerate(targets_feat_vecs):
 
                 feat_vec = feat_vec.view(1, -1, 1, 1)  
@@ -55,7 +55,7 @@ class HeatmapGenerator:
                 heatmap = torch.sum(feature_maps * feat_vec, dim=1, keepdim=True) 
                 heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
 
-                heatmaps[:, i, :, : ,:] = heatmap
+                heatmaps[i] = heatmap.squeeze()
 
         elif mode == "resample_feat_vec": 
 
