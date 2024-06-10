@@ -111,8 +111,10 @@ def extract_diffusion_features(
         input_dataset_paths: dict, 
         output_dataset_path: str = 'output/features/', 
         diffusion_model_path: str = './text-to-video-ms-1.7b', 
-        restrict_frame_size: bool = False, 
+        restrict_frame_size: bool = False,
+        restrict_ncomponents: bool = False,
         max_frame_size: int = 2 ** 20,
+        n_components: int = 10,
         enable_vae_slicing: bool = True,
         use_decoder_features: bool = True
         ):
@@ -120,9 +122,15 @@ def extract_diffusion_features(
     Extract and save video diffusion features from input datasets.
 
     Parameters:
-    - input_dataset_paths: Dictionary where keys are dataset names and values are paths to the datasets.
-    - output_dataset_path: Directory path where the output .pkl files with features will be saved.
-    - diffusion_model_path: Path to the pre-trained diffusion model.
+    - input_dataset_paths (dict): A dictionary where keys are dataset names and values are paths to the datasets.
+    - output_dataset_path (str): Directory path where the output .pkl files with extracted features will be saved. Defaults to 'output/features/'.
+    - diffusion_model_path (str): Path to the pre-trained diffusion model. Defaults to './text-to-video-ms-1.7b'.
+    - restrict_frame_size (bool): If True, restricts the size of video frames. Defaults to False.
+    - restrict_ncomponents (bool): If True, applies PCA to reduce the number of components in the features. Defaults to False.
+    - max_frame_size (int): Maximum allowed size for video frames when restrict_frame_size is True. Defaults to 2**20.
+    - n_components (int): Number of components to keep when applying PCA if restrict_ncomponents is True. Defaults to 10.
+    - enable_vae_slicing (bool): If True, enables slicing in the Variational Autoencoder (VAE) for memory efficiency. Defaults to True.
+    - use_decoder_features (bool): If True, uses features from the decoder part of the diffusion model. Defaults to True.
     """
 
     datasets = {}
@@ -150,10 +158,10 @@ def extract_diffusion_features(
             video_tensor = torch.tensor(data_with_features_dict['video'])
             video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, prompt = prompt, use_decoder_features=use_decoder_features)
 
-            if restrict_frame_size:
+            if restrict_frame_size or restrict_ncomponents:
                 for vfk, vfvs in video_features_dict.items():
                     for idx, vfv in enumerate(vfvs):
-                        video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size)
+                        video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size) if restrict_frame_size else do_pca(vfv, n_components)
                     
             data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
 

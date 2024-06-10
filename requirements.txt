@@ -7,3 +7,4 @@ av
 tensorflow
 tensorflow_datasets
 imageio
+wandb
