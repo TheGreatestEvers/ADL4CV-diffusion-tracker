@@ -167,6 +167,7 @@ text-to-video-ms-1.7b
 test.*
 
 zero-shot/output/*.gif
+zero_shot/output/*.gif
 
 video_features.pt
 
