@@ -171,7 +171,9 @@ zero_shot/output/*.gif
 
 video_features.pt
 
-tapvid_davis
+tapvid_davis/README.md
+tapvid_davis/SOURCES.md
+tapvid_davis.pkl
 
 video_*
 

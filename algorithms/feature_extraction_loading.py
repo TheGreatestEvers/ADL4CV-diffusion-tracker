@@ -1,5 +1,6 @@
 import os
 import torch
+import time
 import pickle
 import copy
 import gc
@@ -46,6 +47,21 @@ class FeatureDataset(Dataset):
             dataset = pickle.load(dataset_file)
 
         return dataset
+
+class FeaturesInMemoryDataset(Dataset):
+    def __init__(self, feature_dataset_path: str = 'output/features/'):
+
+        self.dataset = []
+
+        for file in os.listdir(feature_dataset_path):
+            with open(file, 'rb') as file:
+                self.dataset.append(pickle.load(file))
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        return self.dataset[idx]
     
 def do_pca(feature_tensor: torch.Tensor, n_components: int):
     F, C, H, W = feature_tensor.shape
@@ -58,7 +74,7 @@ def do_pca(feature_tensor: torch.Tensor, n_components: int):
     transformed_features = pca.fit_transform(flattened_features)
 
     # Reshape back to the original structure, but with the new number of components
-    transformed_features = torch.from_numpy(transformed_features).view(F, H, W, n_components)
+    transformed_features = torch.from_numpy(transformed_features).to(torch.float16).view(F, H, W, n_components)
 
     # Permute to match the original tensor format (F, C, H, W)
     transformed_features = transformed_features.permute(0, 3, 1, 2)
@@ -138,7 +154,7 @@ def extract_diffusion_features(
     diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=enable_vae_slicing)
     
     if 'davis' in input_dataset_paths.keys():
-        datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])
+        datasets['davis'] = create_davis_dataset(os.path.join(input_dataset_paths['davis'], 'tapvid_davis.pkl'))
 
     for dataset_name, dataset_values in datasets.items():
         print('Dataset: ' + dataset_name)
@@ -146,23 +162,29 @@ def extract_diffusion_features(
         os.makedirs(os.path.join(output_dataset_path, dataset_name), exist_ok=True)
 
         for data_idx, data in tqdm(enumerate(dataset_values), desc="Progress: "):
-            data_with_features_dict = data[dataset_name]
 
             prompt = ""
-            with open(os.path.join('../tapvid_davis_prompts/', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
+            with open(os.path.join(input_dataset_paths[dataset_name], 'prompts', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
                 prompt = prompt_file.read()
 
                 prompt_file.close()
             print(prompt)
 
-            video_tensor = torch.tensor(data_with_features_dict['video'])
+            start_time = time.time()
+            video_tensor = torch.tensor(data[dataset_name]['video'])
             video_features_dict = diffusion_wrapper.extract_video_features(video_tensor, prompt = prompt, use_decoder_features=use_decoder_features)
+            end_time = time.time()
+            print(end_time - start_time)
 
+            start_time = time.time()
             if restrict_frame_size or restrict_ncomponents:
                 for vfk, vfvs in video_features_dict.items():
                     for idx, vfv in enumerate(vfvs):
                         video_features_dict[vfk][idx] = restrict_frame_size_to(vfv, max_frame_size) if restrict_frame_size else do_pca(vfv, n_components)
-                    
+            end_time = time.time()
+            print(end_time - start_time)
+            
+            data_with_features_dict = data[dataset_name]
             data_with_features_dict['features'] = copy.deepcopy(video_features_dict)
 
             with open(os.path.join(output_dataset_path, dataset_name, 'video_' + str(data_idx)) + '.pkl', 'wb') as data_with_features_dict_file:
@@ -214,4 +236,4 @@ def concatenate_video_features(features, force_max_spatial: int = None, perform_
 
 
 if __name__ == '__main__':
-    extract_diffusion_features(input_dataset_paths={'davis': '/tapvid_davis/tapvid_davis.pkl'}, diffusion_model_path='../text-to-video-ms-1.7b/')
+    extract_diffusion_features(input_dataset_paths={'tapvid_davis': '/tapvid_davis/tapvid_davis.pkl'}, diffusion_model_path='../text-to-video-ms-1.7b/')
