@@ -49,13 +49,11 @@ class ZeroShotTracker:
         for i, hmp in enumerate(heatmaps):
 
             # Perform softmax on heatmaps
-            hmp_reshaped = hmp.view(F, -1)
-            hmp_softmax = self.softmax(hmp_reshaped)
-            hmp_softmax = hmp_softmax.view(F, H, W)
+            hmp_softmax = self.softmax(hmp.view(F, -1)) # Shape F, H*W
 
             # Compute argmax indices
-            argmax_flat = torch.argmax(hmp_softmax.view(F, H*W), dim=1)
-            argmax_indices = torch.stack((argmax_flat // hmp.shape[-1], argmax_flat % hmp.shape[-1]), dim=-1).to(heatmaps.device)
+            argmax_flat = torch.argmax(hmp_softmax, dim=1)
+            argmax_indices = torch.stack((argmax_flat // hmp.shape[-1], argmax_flat % hmp.shape[-1]), dim=-1)
 
             # Get soft argmax indices
             tracks[i] = self.soft_argmax(hmp, argmax_indices)

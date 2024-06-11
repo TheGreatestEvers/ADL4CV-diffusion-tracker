@@ -42,7 +42,7 @@ class WeightedFeaturesTracker(torch.nn.Module):
         concat_features = concatenate_video_features(feature_dict)
 
         # Calculate heatmaps
-        hmps = self.heatmap_generator.generate(concat_features, query_points, device=device)
+        hmps = self.heatmap_generator.generate(concat_features, query_points)
 
         # Tracking
         tracks = self.tracker.track(hmps)
@@ -85,9 +85,9 @@ class WeightedHeatmapsTracker(torch.nn.Module):
 
         for block_name, block_feature_list in feature_dict.items():
             for i, block_features in enumerate(block_feature_list):
-                concat_features = concatenate_video_features(block_features, force_max_spatial=256)
+                concat_features = concatenate_video_features(block_features, force_max_spatial=256).float()
 
-                hmps = self.heatmap_generator.generate(concat_features, query_points, device=device)
+                hmps = self.heatmap_generator.generate(concat_features, query_points)
 
                 # Apply weight to heatmap
                 hmps *= self.params[block_name][i]

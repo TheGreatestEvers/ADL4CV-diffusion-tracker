@@ -1,6 +1,7 @@
 import torch
-import numpy as np
 import math
+
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 class HeatmapGenerator:
     """
@@ -10,7 +11,7 @@ class HeatmapGenerator:
     def __init__(self) -> None:
         ...
     
-    def generate(self, feature_maps, targets, device="cuda", mode="keep_feat_vec"):
+    def generate(self, feature_maps, targets, mode="keep_feat_vec"):
         """
         Generates Heatmaps.
 
@@ -23,14 +24,11 @@ class HeatmapGenerator:
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [NumPoints, Frames, Height, Width]
         """
-        feature_maps = feature_maps.to(dtype=torch.float32).to(device=device)
+        feature_maps = feature_maps.to(device=device)
         targets = targets.to(device)
 
         if feature_maps.shape[-1] != feature_maps.shape[-2]:
             ValueError("Featuremaps should have dimensions [Frames, Channels, Height, Width]")
-
-        if feature_maps.dtype != torch.float32:
-            feature_maps = feature_maps.float()
         
         F, C, H, W = feature_maps.shape
         N, _ = targets.shape
@@ -42,17 +40,15 @@ class HeatmapGenerator:
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
 
-            heatmaps = torch.zeros(N, F, H, W).to(device)
-            for i, feat_vec in enumerate(targets_feat_vecs):
+            heatmaps = torch.zeros(N, F, H, W, device=device)
 
-                feat_vec = feat_vec.view(1, -1, 1, 1)  
-                feat_vec = feat_vec.expand(F, C, H, W)
+            for i, target_feat_vec in enumerate(targets_feat_vecs):
                 
                 # Create heatmaps using cosine-similarity
-                norm_target_feat_vec = torch.norm(feat_vec, dim=1, keepdim=True)
+                norm_target_feat_vec = torch.norm(target_feat_vec, dim=0, keepdim=True)
                 norm_feat_vecs = torch.norm(feature_maps, dim=1, keepdim=True)
 
-                heatmap = torch.sum(feature_maps * feat_vec, dim=1, keepdim=True) 
+                heatmap = torch.sum(feature_maps * target_feat_vec.view(1, C, 1, 1), dim=1, keepdim=True) 
                 heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
 
                 heatmaps[i] = heatmap.squeeze()
@@ -91,7 +87,7 @@ class HeatmapGenerator:
 
         return heatmaps
 
-    def __project_point_coordinates(self, targets_input_space, spatial_input_space=256, spatial_latent_space=32):
+    def __project_point_coordinates(self, targets, spatial_input_space=256, spatial_latent_space=32):
         """
         Get Point Coordinates in Latent Space. Assumes quadratic spatial dimensions of input and latent space.
 
@@ -105,9 +101,9 @@ class HeatmapGenerator:
         """
 
         factor = spatial_latent_space / spatial_input_space 
-        targets_latent_space = targets_input_space * torch.tensor([1, factor, factor]).to(targets_input_space.device)
+        targets[:, 1:] *= factor # Targets to latent space
 
-        return targets_latent_space
+        return targets
     
     def __get_feature_vec_bilinear(self, feature_maps, targets):
         """
@@ -137,8 +133,8 @@ class HeatmapGenerator:
             y_frac = y - y_int
 
             # Scale frac part to be in range [-1, 1]
-            x_grid = ( (x_frac - 0) / (1 - 0) ) * (1 - -1) + -1
-            y_grid = ( (y_frac - 0) / (1 - 0) ) * (1 - -1) + -1
+            x_grid = x_frac * 2 - 1
+            y_grid = y_frac * 2 - 1
 
             grid = torch.tensor(
                 [[[[x_grid, y_grid]]]], dtype=torch.float32
@@ -147,7 +143,7 @@ class HeatmapGenerator:
             # 1xCx2x2 Tensor used for interpolation
             feat_map_t_2x2 = feat_map_t[:, :, y_int:y_int+2, x_int:x_int+2]
 
-            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2, grid, mode="bilinear", align_corners=True).squeeze().squeeze()
+            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2.float(), grid, mode="bilinear", align_corners=True).squeeze() # grid_sample works only with float32
 
             feat_vecs[i] = feat_vec
 
