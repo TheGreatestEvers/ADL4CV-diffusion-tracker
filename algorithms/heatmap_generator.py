@@ -1,7 +1,7 @@
 import torch
 import math
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
 
 class HeatmapGenerator:
     """
@@ -40,7 +40,7 @@ class HeatmapGenerator:
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
 
-            heatmaps = torch.zeros(N, F, H, W, device=device)
+            heatmaps = torch.zeros(N, F, H, W, device=device).half()
 
             for i, target_feat_vec in enumerate(targets_feat_vecs):
                 
@@ -117,6 +117,7 @@ class HeatmapGenerator:
         """
 
         feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1]).to(feature_maps.device)
+
         for i, target in enumerate(targets):
 
             t, y, x = target

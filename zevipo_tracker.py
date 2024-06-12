@@ -13,7 +13,7 @@ from learning_based.weighted_features_tracker import WeightedFeaturesTracker, We
 from torch.cuda.amp import GradScaler, autocast
 from math import ceil
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
 
 class ZeViPo():
     def __init__(self, config_file: str):
@@ -23,7 +23,8 @@ class ZeViPo():
         self.dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
         self.dataloader = DataLoader(self.dataset, self.config['batch_size'], shuffle=True, collate_fn=feature_collate_fn)
 
-        self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"]).to(device)
+        #self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"]).to(device).half()
+        self.model = WeightedHeatmapsTracker(next(iter(self.dataloader))[0]["features"]).to(device).half()
 
         self.loss_fn = torch.nn.HuberLoss(reduction='none')
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
@@ -60,7 +61,7 @@ class ZeViPo():
                 trackgroup[start:end],
             )
 
-    def train_one_epoch(self, epoch_index, logger):
+    def train_one_epoch(self, epoch_index):
         for i, data in enumerate(self.dataloader):
             data = data[0]
 
@@ -77,6 +78,9 @@ class ZeViPo():
             ###
 
             feature_dict = data['features']
+            for block_name, block_feat_list in feature_dict.items():
+                for i in range(len(block_feat_list)):
+                    feature_dict[block_name][i] = feature_dict[block_name][i].to(device)
 
             accumulated_loss = 0
             loop_count = 0
@@ -85,26 +89,22 @@ class ZeViPo():
 
                 query_points, target_points, occluded, trackgroup = query_batch
 
-                query_points = torch.tensor(query_points, dtype=torch.float32, device=device)
-                target_points = torch.tensor(target_points[..., [1, 0]], dtype=torch.float32, device=device)
-                occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
-                trackgroup = torch.tensor(trackgroup, dtype=torch.float32, device=device)
-
-                # query_points = torch.cat([torch.tensor(p, dtype=torch.float32, device=device).unsqueeze(0) for p in data['query_points'][0]], dim=0)[indices]
-                # gt_points = torch.tensor(data['target_points'][0][..., [1, 0]], dtype=torch.float32, device=device)[indices]
-                # visible = 1 - torch.tensor(data['occluded'][0], dtype=torch.float32, device=device)[indices]
+                query_points = torch.tensor(query_points, dtype=torch.float16, device=device)
+                target_points = torch.tensor(target_points[..., [1, 0]], dtype=torch.float16, device=device)
+                occluded = torch.tensor(occluded, dtype=torch.float16, device=device)
+                trackgroup = torch.tensor(trackgroup, dtype=torch.float16, device=device)
 
                 self.optimizer.zero_grad()
 
                 with autocast():
                     pred_points = self.model(feature_dict, query_points)
                     losses = self.loss_fn(target_points, pred_points)
-                    loss = torch.mean(losses * (1 - occluded.unsqueeze(-1)))
+                    loss = torch.mean((losses * (1 - occluded.unsqueeze(-1))))
 
-                # self.scaler.scale(loss).backward()
-                # self.scaler.step(self.optimizer)
-                # self.scaler.update()
-                loss = loss.float()
+                #self.scaler.scale(loss).backward()
+                #self.scaler.step(self.optimizer)
+                #self.scaler.update()
+                loss = loss
                 loss.backward()
                 self.optimizer.step()
 
@@ -112,8 +112,7 @@ class ZeViPo():
             
             print(accumulated_loss/loop_count)
 
-            iteration = epoch_index * len(self.dataloader) + i + 1
-            logger.add_scalar('Loss/train', accumulated_loss/loop_count, iteration)
+            #wandb.log({"Loss/train": accumulated_loss/loop_count})
 
 
     def eval_random(self):
@@ -147,17 +146,14 @@ class ZeViPo():
 
 
     def train(self):
-
-        logger = SummaryWriter(log_dir=self.config['log_dir'])
         # wandb.init(entity=self.config['wandb']['entity'],
         #            project=self.config['wandb']['project'],
-        #            sync_tensorboard=True,
         #            config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
             self.model.train(True)
-            self.train_one_epoch(epoch, logger)
+            self.train_one_epoch(epoch)
             continue
 
             self.model.eval()
@@ -167,7 +163,7 @@ class ZeViPo():
 
             logger.flush()
         
-        #wandb.finish()
+        #çwandb.finish()
 
 
 if __name__ == '__main__':
@@ -175,4 +171,4 @@ if __name__ == '__main__':
 
     tracker.train()
     
-    print(tracker.eval_random())
+    #print(tracker.eval_random())
