@@ -24,7 +24,7 @@ class ZeViPo():
         self.dataloader = DataLoader(self.dataset, self.config['batch_size'], shuffle=True, collate_fn=feature_collate_fn)
 
         #self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"]).to(device).half()
-        self.model = WeightedHeatmapsTracker(next(iter(self.dataloader))[0]["features"]).to(device).half()
+        self.model = WeightedHeatmapsTracker(next(iter(self.dataloader))[0]["features"]).to(device)
 
         self.loss_fn = torch.nn.HuberLoss(reduction='none')
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
@@ -99,20 +99,29 @@ class ZeViPo():
                 with autocast():
                     pred_points = self.model(feature_dict, query_points)
                     losses = self.loss_fn(target_points, pred_points)
-                    loss = torch.mean((losses * (1 - occluded.unsqueeze(-1))))
+                    loss = torch.mean(losses * (1 - occluded).unsqueeze(-1))
 
-                #self.scaler.scale(loss).backward()
-                #self.scaler.step(self.optimizer)
-                #self.scaler.update()
-                loss = loss
-                loss.backward()
-                self.optimizer.step()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+
+                print((1 - occluded).unsqueeze(-1))
+                print(losses * (1 - occluded.unsqueeze(-1)))
+                #print(target_points)
+                #print(pred_points)
+
+                for param in self.model.parameters():
+                    print(param)
+
+                #loss = loss
+                #loss.backward()
+                #self.optimizer.step()
 
                 accumulated_loss += loss.item()
             
             print(accumulated_loss/loop_count)
 
-            #wandb.log({"Loss/train": accumulated_loss/loop_count})
+            wandb.log({"Loss/train": accumulated_loss/loop_count})
 
 
     def eval_random(self):
@@ -146,9 +155,9 @@ class ZeViPo():
 
 
     def train(self):
-        # wandb.init(entity=self.config['wandb']['entity'],
-        #            project=self.config['wandb']['project'],
-        #            config=self.config)
+        wandb.init(entity=self.config['wandb']['entity'],
+                   project=self.config['wandb']['project'],
+                   config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
@@ -163,7 +172,7 @@ class ZeViPo():
 
             logger.flush()
         
-        #çwandb.finish()
+        wandb.finish()
 
 
 if __name__ == '__main__':

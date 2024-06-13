@@ -44,7 +44,7 @@ class ZeroShotTracker:
 
         N, F, H, W = heatmaps.shape
 
-        tracks = torch.zeros([N, F, 2], device=heatmaps.device).half()
+        tracks = torch.zeros([N, F, 2], device=heatmaps.device)
 
         for i, hmp in enumerate(heatmaps):
 
@@ -105,9 +105,9 @@ class ZeroShotTracker:
 
         # Create grid of shape FxHxWx2
         grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
-        grid_y = grid_y.unsqueeze(0).expand(F, -1, -1)
-        grid_x = grid_x.unsqueeze(0).expand(F, -1, -1)
-        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device).half()
+        grid_y = grid_y.unsqueeze(0).expand(F, -1, -1).float()
+        grid_x = grid_x.unsqueeze(0).expand(F, -1, -1).float()
+        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
 
         # Generate mask of a circle of radius radius around the argmax
         mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)), dim=-1) <= self.argmax_radius # shape (B, H, W)
