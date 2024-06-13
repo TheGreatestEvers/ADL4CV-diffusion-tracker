@@ -2,7 +2,7 @@ dataset_dir: features/davis/
 log_dir: logs/
 batch_size: 1
 learning_rate: !!float 0.001
-epochs: 50
+epochs: 1000
 
 wandb:
   project: 'zevipo'

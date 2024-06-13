@@ -66,6 +66,7 @@ class WeightedHeatmapsTracker(torch.nn.Module):
         self.params = torch.nn.ParameterDict()
 
         for block_name, block_feature_list in feature_dict.items():
+            print(block_name)
             self.params[block_name] = torch.nn.Parameter(torch.ones(len(block_feature_list)))
 
 

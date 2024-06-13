@@ -40,7 +40,7 @@ class HeatmapGenerator:
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
 
-            heatmaps = torch.zeros(N, F, H, W, device=device).half()
+            heatmaps = torch.zeros(N, F, H, W, device=device)
 
             for i, target_feat_vec in enumerate(targets_feat_vecs):
                 
@@ -144,7 +144,7 @@ class HeatmapGenerator:
             # 1xCx2x2 Tensor used for interpolation
             feat_map_t_2x2 = feat_map_t[:, :, y_int:y_int+2, x_int:x_int+2]
 
-            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2.float(), grid, mode="bilinear", align_corners=True).squeeze() # grid_sample works only with float32
+            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2, grid, mode="bilinear", align_corners=True).squeeze() # grid_sample works only with float32
 
             feat_vecs[i] = feat_vec
 
