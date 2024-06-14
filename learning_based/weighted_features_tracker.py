@@ -18,6 +18,8 @@ class WeightedFeaturesTracker(torch.nn.Module):
         self.heatmap_generator = HeatmapGenerator()
         self.tracker = ZeroShotTracker()
 
+        self.softmax = torch.nn.Softmax()
+
         # Create parameter dict
         self.params = torch.nn.ParameterDict()
 
@@ -49,7 +51,11 @@ class WeightedFeaturesTracker(torch.nn.Module):
         # Tracking
         tracks = self.tracker.track(hmps)
 
-        return tracks
+        # Also return softmax heatmaps
+        N, F, H, W = hmps.shape
+        hmps_softmax = self.softmax(hmps.view(N, F, -1)).view(N, F, H, W)
+
+        return (tracks, hmps_softmax)
 
 
 class WeightedHeatmapsTracker(torch.nn.Module):
