@@ -44,7 +44,7 @@ class ZeroShotTracker:
 
         N, F, H, W = heatmaps.shape
 
-        tracks = torch.zeros([N, F, 2], device=heatmaps.device)
+        tracks = torch.zeros([N, F, 2], dtype=torch.float32, device=heatmaps.device)
 
         for i, hmp in enumerate(heatmaps):
 
@@ -124,6 +124,6 @@ class ZeroShotTracker:
             heatmap[hm_zero_indices] = heatmap[hm_zero_indices] * mask[hm_zero_indices]
             hm_sum[hm_zero_indices] = torch.sum(heatmap[hm_zero_indices], dim=(1, 2))
 
-        points = torch.sum(grid.float() * heatmap.unsqueeze(-1).float(), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
+        points = torch.sum(grid.float() * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
         
         return points

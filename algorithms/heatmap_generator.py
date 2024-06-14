@@ -1,7 +1,8 @@
 import torch
 import math
 
-device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
+#device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
+device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
 class HeatmapGenerator:
     """
@@ -40,7 +41,7 @@ class HeatmapGenerator:
             targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
 
 
-            heatmaps = torch.zeros(N, F, H, W, device=device)
+            heatmaps = torch.zeros(N, F, H, W, device=device, dtype=torch.float32)
 
             for i, target_feat_vec in enumerate(targets_feat_vecs):
                 
@@ -116,7 +117,7 @@ class HeatmapGenerator:
         Returns: Tensor with feature vectors at point locations. Dimension: [N, Channels]
         """
 
-        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1]).to(feature_maps.device)
+        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1], dtype=torch.float64).to(feature_maps.device)
 
         for i, target in enumerate(targets):
 
