@@ -53,7 +53,7 @@ class ZeViPo():
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config['learning_rate'])
         self.scaler = GradScaler()
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.97)
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.94)
 
         self.epochs = self.config['epochs']
 
@@ -141,7 +141,7 @@ class ZeViPo():
                 #    losses = self.loss_fn(target_points, pred_points)
                 #    loss = torch.mean(losses * (1 - occluded).unsqueeze(-1))
 
-                pred_points, pred_heatmaps = self.model(feature_dict, query_points)
+                pred_points = self.model(feature_dict, query_points)
                 pred_points = pred_points * (1 - occluded).unsqueeze(-1)
                 #pred_heatmaps = pred_heatmaps * (1 - occluded).unsqueeze(-1).unsqueeze(0).unsqueeze(0)
                 
@@ -220,7 +220,8 @@ class ZeViPo():
             self.model.train(True)
             self.train_one_epoch(epoch)
 
-            self.scheduler.step()
+            #if (epoch+1) % 10 == 0:
+            #    self.scheduler.step()
             continue
 
             self.model.eval()

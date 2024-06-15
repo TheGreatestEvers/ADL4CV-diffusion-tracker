@@ -1,7 +1,7 @@
 dataset_dir: features/davis/
 log_dir: logs/
 batch_size: 1
-learning_rate: !!float 0.001
+learning_rate: !!float 0.00025
 epochs: 1000
 
 wandb:
