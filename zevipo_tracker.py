@@ -9,6 +9,7 @@ from algorithms.feature_extraction_loading import FeatureDataset
 from algorithms.utils import read_config_file, feature_collate_fn
 from evaluation.evaluation_datasets import compute_tapvid_metrics
 from learning_based.weighted_features_tracker import WeightedFeaturesTracker, WeightedHeatmapsTracker
+from learning_based.learn_upsample_tracker import LearnUpsampleTracker
 from torch.cuda.amp import GradScaler, autocast
 from math import ceil
 from torch.autograd import gradcheck
@@ -42,14 +43,15 @@ class ZeViPo():
         self.dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
         self.dataloader = DataLoader(self.dataset, self.config['batch_size'], shuffle=True, collate_fn=feature_collate_fn)
 
-        self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"]).to(device)
+        #self.model = WeightedFeaturesTracker(next(iter(self.dataloader))[0]["features"]).to(device)
         #self.model = WeightedHeatmapsTracker(next(iter(self.dataloader))[0]["features"]).to(device)
+        self.model = LearnUpsampleTracker(next(iter(self.dataloader))[0]["features"]).to(device)
 
         self.loss_fn = torch.nn.MSELoss()
         self.loss_fn_heatmaps = HeatmapCrossEntropyLoss()
 
-        #self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config['learning_rate'])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
+        #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config['learning_rate'])
         self.scaler = GradScaler()
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.97)
 
@@ -130,7 +132,7 @@ class ZeViPo():
                 occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
                 trackgroup = torch.tensor(trackgroup, dtype=torch.float32, device=device)
 
-                target_heatmaps = self.build_target_heatmaps(target_points)
+                #target_heatmaps = self.build_target_heatmaps(target_points)
 
                 self.optimizer.zero_grad()
 
@@ -141,13 +143,13 @@ class ZeViPo():
 
                 pred_points, pred_heatmaps = self.model(feature_dict, query_points)
                 pred_points = pred_points * (1 - occluded).unsqueeze(-1)
-                pred_heatmaps = pred_heatmaps * (1 - occluded).unsqueeze(-1).unsqueeze(0).unsqueeze(0)
+                #pred_heatmaps = pred_heatmaps * (1 - occluded).unsqueeze(-1).unsqueeze(0).unsqueeze(0)
                 
-                #loss = self.loss_fn(target_points, pred_points)
-                #loss.backward()
+                loss = self.loss_fn(target_points, pred_points)
+                loss.backward()
 
-                heatmap_loss = self.loss_fn_heatmaps(target_heatmaps, pred_heatmaps)
-                heatmap_loss.backward()
+                #heatmap_loss = self.loss_fn_heatmaps(target_heatmaps, pred_heatmaps)
+                #heatmap_loss.backward()
 
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
 
@@ -165,17 +167,17 @@ class ZeViPo():
                 #     print(param)
                 #     print(param.grad)
 
-                wandb.log({"loss": heatmap_loss.item()})
+                wandb.log({"loss": loss.item()})
                 # for i, param in enumerate(self.model.parameters()):
                 #     if param.grad is not None:
                 #         wandb.log({f"param_{i}_grad": wandb.Histogram(param.grad.cpu().detach().numpy())})
                 #     wandb.log({f"param_{i}_param": wandb.Histogram(param.cpu().detach().numpy())})
 
-                #accumulated_loss += loss.item()
+                accumulated_loss += loss.item()
             
             #print(accumulated_loss/loop_count)
 
-            #wandb.log({"Loss/train": accumulated_loss/loop_count})
+            wandb.log({"Loss/train": accumulated_loss/loop_count})
 
 
     def eval_random(self):

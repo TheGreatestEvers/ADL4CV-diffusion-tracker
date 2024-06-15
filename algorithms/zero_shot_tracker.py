@@ -28,7 +28,7 @@ class ZeroShotTracker:
     
     def __init__(self) -> None:
 
-        self.argmax_radius = 24
+        self.argmax_radius = 34
         self.softmax = torch.nn.Softmax(dim=-1)
 
     def track(self, heatmaps):
