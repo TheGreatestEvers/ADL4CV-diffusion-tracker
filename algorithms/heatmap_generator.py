@@ -117,7 +117,7 @@ class HeatmapGenerator:
         Returns: Tensor with feature vectors at point locations. Dimension: [N, Channels]
         """
 
-        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1], dtype=torch.float64).to(feature_maps.device)
+        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1]).to(feature_maps.device)
 
         for i, target in enumerate(targets):
 
