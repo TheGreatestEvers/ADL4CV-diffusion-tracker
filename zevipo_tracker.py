@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from algorithms.feature_extraction_loading import FeatureDataset
 from algorithms.utils import read_config_file, feature_collate_fn
 from evaluation.evaluation_datasets import compute_tapvid_metrics
-from learning_based.weighted_features_tracker import WeightedFeaturesTracker, WeightedHeatmapsTracker
+#from learning_based.weighted_features_tracker import WeightedFeaturesTracker, WeightedHeatmapsTracker
 from learning_based.learn_upsample_tracker import LearnUpsampleTracker
 from torch.cuda.amp import GradScaler, autocast
 from math import ceil
@@ -132,8 +132,6 @@ class ZeViPo():
                 occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
                 trackgroup = torch.tensor(trackgroup, dtype=torch.float32, device=device)
 
-                #target_heatmaps = self.build_target_heatmaps(target_points)
-
                 self.optimizer.zero_grad()
 
                 #with autocast():
@@ -141,15 +139,11 @@ class ZeViPo():
                 #    losses = self.loss_fn(target_points, pred_points)
                 #    loss = torch.mean(losses * (1 - occluded).unsqueeze(-1))
 
-                pred_points = self.model(feature_dict, query_points)
+                pred_points, pred_occlusions = self.model(feature_dict, query_points)
                 pred_points = pred_points * (1 - occluded).unsqueeze(-1)
-                #pred_heatmaps = pred_heatmaps * (1 - occluded).unsqueeze(-1).unsqueeze(0).unsqueeze(0)
                 
                 loss = self.loss_fn(target_points, pred_points)
                 loss.backward()
-
-                #heatmap_loss = self.loss_fn_heatmaps(target_heatmaps, pred_heatmaps)
-                #heatmap_loss.backward()
 
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
 
@@ -158,27 +152,13 @@ class ZeViPo():
                 #self.scaler.scale(loss).backward()
                 #self.scaler.step(self.optimizer)
                 #self.scaler.update()
-                #print("Pred and Target:")
-                #print(pred_points)
-                #print(target_points)
 
-                # print("Param and Grad:")
-                # for param in self.model.parameters():
-                #     print(param)
-                #     print(param.grad)
+                # wandb.log({"Loss/train": loss.item()})
 
-                wandb.log({"loss": loss.item()})
-                # for i, param in enumerate(self.model.parameters()):
-                #     if param.grad is not None:
-                #         wandb.log({f"param_{i}_grad": wandb.Histogram(param.grad.cpu().detach().numpy())})
-                #     wandb.log({f"param_{i}_param": wandb.Histogram(param.cpu().detach().numpy())})
 
                 accumulated_loss += loss.item()
             
-            #print(accumulated_loss/loop_count)
-
-            wandb.log({"Loss/train": accumulated_loss/loop_count})
-
+            print(accumulated_loss/loop_count)
 
     def eval_random(self):
         tracking_accuracy = []
@@ -211,9 +191,9 @@ class ZeViPo():
 
 
     def train(self):
-        wandb.init(entity=self.config['wandb']['entity'],
-                  project=self.config['wandb']['project'],
-                  config=self.config)
+        # wandb.init(entity=self.config['wandb']['entity'],
+        #           project=self.config['wandb']['project'],
+        #           config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
@@ -231,7 +211,7 @@ class ZeViPo():
 
             logger.flush()
         
-        wandb.finish()
+        # wandb.finish()
 
 
 if __name__ == '__main__':
