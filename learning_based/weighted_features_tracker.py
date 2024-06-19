@@ -1,7 +1,7 @@
 import torch
 from torchvision.transforms.functional import resize 
 from algorithms.heatmap_generator import HeatmapGenerator
-from algorithms.zero_shot_tracker import ZeroShotTracker
+from algorithms.heatmap_processor import HeatmapProcessor
 from algorithms.feature_extraction_loading import concatenate_video_features
 
 #device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
@@ -16,7 +16,7 @@ class WeightedFeaturesTracker(torch.nn.Module):
         super().__init__()
 
         self.heatmap_generator = HeatmapGenerator()
-        self.tracker = ZeroShotTracker()
+        self.heatmap_processor = HeatmapProcessor()
 
         self.softmax = torch.nn.Softmax()
 
@@ -49,7 +49,7 @@ class WeightedFeaturesTracker(torch.nn.Module):
         hmps = self.heatmap_generator.generate(concat_features, query_points)
 
         # Tracking
-        tracks = self.tracker.track(hmps)
+        tracks = self.heatmap_processor.(hmps)
 
         # Also return softmax heatmaps
         N, F, H, W = hmps.shape
