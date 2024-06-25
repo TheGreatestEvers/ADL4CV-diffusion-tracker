@@ -53,7 +53,9 @@ class ZeViPo():
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['learning_rate'])
         #self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config['learning_rate'])
         self.scaler = GradScaler()
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.94)
+        
+        #self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.96)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.5)
 
         self.epochs = self.config['epochs']
 
@@ -109,10 +111,10 @@ class ZeViPo():
             data = data[0]
 
             ### Overfitting to single data point
-            data["query_points"] = data["query_points"][:,:1,:]
-            data["target_points"] = data["target_points"][:,:1,:]
-            data["occluded"] = data["occluded"][:,:1]
-            data["trackgroup"] = data["trackgroup"][:,:1]
+            #data["query_points"] = data["query_points"][:,:1,:]
+            #data["target_points"] = data["target_points"][:,:1,:]
+            #data["occluded"] = data["occluded"][:,:1]
+            #data["trackgroup"] = data["trackgroup"][:,:1]
             ###
 
             feature_dict = data['features']
@@ -122,7 +124,8 @@ class ZeViPo():
 
             accumulated_loss = 0
             loop_count = 0
-            for query_batch in self.get_query_batch(data["query_points"][0], data["target_points"][0], data["occluded"][0], data["trackgroup"][0]):
+            for query_batch in self.get_query_batch(data["query_points"][0], data["target_points"][0], \
+                data["occluded"][0], data["trackgroup"][0]):
                 loop_count += 1
 
                 query_points, target_points, occluded, trackgroup = query_batch
@@ -153,12 +156,17 @@ class ZeViPo():
                 #self.scaler.step(self.optimizer)
                 #self.scaler.update()
 
-                # wandb.log({"Loss/train": loss.item()})
+                wandb.log({"Loss/train - batch": loss.item()})
 
 
                 accumulated_loss += loss.item()
             
             print(accumulated_loss/loop_count)
+            wandb.log({"Loss/train - epoch": accumulated_loss/loop_count})
+
+            if accumulated_loss/loop_count < 1.5:
+                torch.save(tracker.model.state_dict(), 'trained_upsample_small_loss.pth')
+
 
     def eval_random(self):
         tracking_accuracy = []
@@ -191,14 +199,16 @@ class ZeViPo():
 
 
     def train(self):
-        # wandb.init(entity=self.config['wandb']['entity'],
-        #           project=self.config['wandb']['project'],
-        #           config=self.config)
+        wandb.init(entity=self.config['wandb']['entity'],
+           project=self.config['wandb']['project'],
+           config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
             self.model.train(True)
             self.train_one_epoch(epoch)
+
+            self.scheduler.step()
 
             #if (epoch+1) % 10 == 0:
             #    self.scheduler.step()
@@ -211,12 +221,14 @@ class ZeViPo():
 
             logger.flush()
         
-        # wandb.finish()
+        wandb.finish()
 
 
 if __name__ == '__main__':
     tracker = ZeViPo('configs/config.yml')
 
     tracker.train()
+
+    torch.save(tracker.model.state_dict(), 'trained_upsample_1.pth')
     
     #print(tracker.eval_random())
