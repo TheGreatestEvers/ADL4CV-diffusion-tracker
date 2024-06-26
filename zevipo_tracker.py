@@ -13,6 +13,7 @@ from learning_based.learn_upsample_tracker import LearnUpsampleTracker
 from torch.cuda.amp import GradScaler, autocast
 from math import ceil
 from torch.autograd import gradcheck
+import torch.utils.bottleneck
 
 #device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
@@ -122,7 +123,7 @@ class ZeViPo():
                 for i in range(len(block_feat_list)):
                     feature_dict[block_name][i] = feature_dict[block_name][i].to(dtype=torch.float32).to(device)
 
-            accumulated_loss = 0
+            accumulated_loss = torch.zeros(1, device=device)
             loop_count = 0
             for query_batch in self.get_query_batch(data["query_points"][0], data["target_points"][0], \
                 data["occluded"][0], data["trackgroup"][0]):
@@ -156,15 +157,14 @@ class ZeViPo():
                 #self.scaler.step(self.optimizer)
                 #self.scaler.update()
 
-                wandb.log({"Loss/train - batch": loss.item()})
+                #wandb.log({"Loss/train - batch": loss})
 
 
-                accumulated_loss += loss.item()
+                accumulated_loss += loss
             
-            print(accumulated_loss/loop_count)
-            wandb.log({"Loss/train - epoch": accumulated_loss/loop_count})
+            #wandb.log({"Loss/train - epoch": accumulated_loss.item()/loop_count})
 
-            if accumulated_loss/loop_count < 1.5:
+            if accumulated_loss.item()/loop_count < 1.5:
                 torch.save(tracker.model.state_dict(), 'trained_upsample_small_loss.pth')
 
 
@@ -199,9 +199,9 @@ class ZeViPo():
 
 
     def train(self):
-        wandb.init(entity=self.config['wandb']['entity'],
-           project=self.config['wandb']['project'],
-           config=self.config)
+        #wandb.init(entity=self.config['wandb']['entity'],
+        #   project=self.config['wandb']['project'],
+        #   config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
@@ -221,14 +221,13 @@ class ZeViPo():
 
             logger.flush()
         
-        wandb.finish()
-
+        #wandb.finish()    
 
 if __name__ == '__main__':
     tracker = ZeViPo('configs/config.yml')
 
     tracker.train()
 
-    torch.save(tracker.model.state_dict(), 'trained_upsample_1.pth')
+    #torch.save(tracker.model.state_dict(), 'trained_upsample_1.pth')
     
     #print(tracker.eval_random())

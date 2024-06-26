@@ -117,36 +117,30 @@ class HeatmapGenerator:
         Returns: Tensor with feature vectors at point locations. Dimension: [N, Channels]
         """
 
-        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1]).to(feature_maps.device)
+        N = targets.shape[0]
+        feat_vecs = torch.zeros(N, feature_maps.shape[1], device=feature_maps.device)
 
-        for i, target in enumerate(targets):
+        # Extract target coordinates
+        t = targets[:, 0].long()  # Time dimension
+        y = targets[:, 1]  # y dimension
+        x = targets[:, 2]  # x dimension
 
-            t, y, x = target
-            t = t.item()
-            y = y.item()
-            x = x.item()
+        # Get integer and fractional parts
+        x_int = x.floor().long()
+        x_frac = x - x_int.float()
+        y_int = y.floor().long()
+        y_frac = y - y_int.float()
 
-            feat_map_t = feature_maps[int(t)].unsqueeze(0) # 1, C, H, W
+        # Gather values from tensor1 using advanced indexing
+        Q11 = feature_maps[t, :, y_int, x_int]
+        Q12 = feature_maps[t, :, y_int, x_int+1]
+        Q21 = feature_maps[t, :, y_int+1, x_int]
+        Q22 = feature_maps[t, :, y_int+1, x_int+1]
 
-            x_int = math.floor(x)
-            x_frac = x - x_int
-
-            y_int = math.floor(y)
-            y_frac = y - y_int
-
-            # Scale frac part to be in range [-1, 1]
-            x_grid = x_frac * 2 - 1
-            y_grid = y_frac * 2 - 1
-
-            grid = torch.tensor(
-                [[[[x_grid, y_grid]]]], dtype=torch.float32
-            ).to(feature_maps.device)
-
-            # 1xCx2x2 Tensor used for interpolation
-            feat_map_t_2x2 = feat_map_t[:, :, y_int:y_int+2, x_int:x_int+2]
-
-            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2, grid, mode="bilinear", align_corners=True).squeeze() # grid_sample works only with float32
-
-            feat_vecs[i] = feat_vec
+        # Interpolated values
+        feat_vecs = Q11 * (1 - x_frac).view(N,1) * (1 - y_frac).view(N,1) \
+            + Q12 * (x_frac).view(N,1) * (1 - y_frac).view(N,1) \
+            + Q21 * (y_frac).view(N,1) * (1 - x_frac).view(N,1) \
+            + Q22 * (x_frac).view(N,1) * (y_frac).view(N,1)
 
         return feat_vecs
