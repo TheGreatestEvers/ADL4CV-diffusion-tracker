@@ -57,42 +57,22 @@ class HeatmapProcessor(torch.nn.Module):
         # Add channel dim and reshape to N*F, C, H, W
         heatmaps = heatmaps.unsqueeze(2).view(N*F, 1, H, W)
 
-        processed_heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
-        processed_heatmaps = self.relu(processed_heatmaps)
-
-        assert processed_heatmaps.shape[-1] == heatmaps.shape[-1]
+        heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
+        heatmaps = self.relu(heatmaps)
 
         # Position inference
-        position_heatmaps = self.heatmap_processing_layers["hid2"](processed_heatmaps)
-        position_heatmaps_shape = position_heatmaps.shape
-        position_heatmaps = torch.flatten(position_heatmaps, start_dim=2)
-        position_heatmaps = self.softmax(position_heatmaps)
+        heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
+        heatmaps = torch.flatten(heatmaps, start_dim=2)
+        heatmaps = self.softmax(heatmaps)
 
-        argmax_flat = torch.argmax(position_heatmaps.squeeze(), dim=-1)
-        argmax_indices = torch.stack((argmax_flat // position_heatmaps_shape[-1], argmax_flat % position_heatmaps_shape[-1]), dim=-1)
+        argmax_flat = torch.argmax(heatmaps.squeeze(), dim=-1)
+        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
 
-        points = self.soft_argmax(position_heatmaps.view(position_heatmaps_shape).squeeze(), argmax_indices)
+        points = self.soft_argmax(heatmaps.view(N*F, 1, H, W).squeeze(), argmax_indices)
         points = points.view(N, F, -1)
 
         # Occlusion inference
         occlusions = torch.zeros(1)
-
-
-        
-
-        # tracks = torch.zeros([N, F, 2], dtype=torch.float32, device=heatmaps.device)
-
-        # for i, hmp in enumerate(heatmaps):
-
-        #     # Perform softmax on heatmaps
-        #     hmp_softmax = self.softmax(hmp.view(F, -1)) # Shape F, H*W
-
-        #     # Compute argmax indices
-        #     argmax_flat = torch.argmax(hmp_softmax, dim=1)
-        #     argmax_indices = torch.stack((argmax_flat // hmp.shape[-1], argmax_flat % hmp.shape[-1]), dim=-1)
-
-        #     # Get soft argmax indices
-        #     tracks[i] = self.soft_argmax(hmp, argmax_indices)
         
         return points, occlusions
 
