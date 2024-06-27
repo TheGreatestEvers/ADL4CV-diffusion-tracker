@@ -140,14 +140,14 @@ def place_marker_in_frames(frames, tracks, occluded = None, safe_as_gif=True, gr
                     if N != 1:
                         ValueError("Show ground truth only possible when only one point is tracked.")
                     y_gt, x_gt = ground_truth_tracks[i]
-                    draw.ellipse((x_gt-6, y_gt-6, x_gt+6, y_gt+6), fill=(0, 255, 0))
+                    draw.ellipse((x_gt-2, y_gt-2, x_gt+2, y_gt+2), fill=(0, 255, 0))
 
                 # Get the coordinates for the marker from indices
                 y, x = tracks[n, i]
                 
                 # Draw the marker as a filled circle
                 if occluded is None or not occluded[n, i]:
-                    draw.ellipse((x-6, y-6, x+6, y+6), fill=(0, 0, 255))
+                    draw.ellipse((x-2, y-2, x+2, y+2), fill=(0, 0, 255))
 
                 
             # Append the modified frame to the list

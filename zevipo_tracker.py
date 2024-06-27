@@ -138,10 +138,10 @@ class ZeViPo():
 
                 self.optimizer.zero_grad()
 
-                #with autocast():
-                #    pred_points = self.model(feature_dict, query_points)
-                #    losses = self.loss_fn(target_points, pred_points)
-                #    loss = torch.mean(losses * (1 - occluded).unsqueeze(-1))
+                with autocast():
+                   pred_points = self.model(feature_dict, query_points)
+                   losses = self.loss_fn(target_points, pred_points)
+                   loss = torch.mean(losses * (1 - occluded).unsqueeze(-1))
 
                 pred_points, pred_occlusions = self.model(feature_dict, query_points)
                 pred_points = pred_points * (1 - occluded).unsqueeze(-1)
