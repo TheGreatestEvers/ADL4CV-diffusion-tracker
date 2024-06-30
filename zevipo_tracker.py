@@ -56,7 +56,7 @@ class ZeViPo():
         self.scaler = GradScaler()
         
         #self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.96)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.5)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=30, gamma=0.5)
 
         self.epochs = self.config['epochs']
 
@@ -111,13 +111,6 @@ class ZeViPo():
         for i, data in enumerate(self.dataloader):
             data = data[0]
 
-            ### Overfitting to single data point
-            #data["query_points"] = data["query_points"][:,:1,:]
-            #data["target_points"] = data["target_points"][:,:1,:]
-            #data["occluded"] = data["occluded"][:,:1]
-            #data["trackgroup"] = data["trackgroup"][:,:1]
-            ###
-
             feature_dict = data['features']
             for block_name, block_feat_list in feature_dict.items():
                 for i in range(len(block_feat_list)):
@@ -149,20 +142,18 @@ class ZeViPo():
                 loss = self.loss_fn(target_points, pred_points)
                 loss.backward()
 
-                #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
-
                 self.optimizer.step()
 
                 #self.scaler.scale(loss).backward()
                 #self.scaler.step(self.optimizer)
                 #self.scaler.update()
 
-                #wandb.log({"Loss/train - batch": loss})
+                wandb.log({"Loss/train - batch": loss})
 
 
                 accumulated_loss += loss
             
-            #wandb.log({"Loss/train - epoch": accumulated_loss.item()/loop_count})
+            wandb.log({"Loss/train - epoch": accumulated_loss.item()/loop_count})
 
             if accumulated_loss.item()/loop_count < 1.5:
                 torch.save(tracker.model.state_dict(), 'trained_upsample_small_loss.pth')
@@ -199,9 +190,9 @@ class ZeViPo():
 
 
     def train(self):
-        #wandb.init(entity=self.config['wandb']['entity'],
-        #   project=self.config['wandb']['project'],
-        #   config=self.config)
+        wandb.init(entity=self.config['wandb']['entity'],
+          project=self.config['wandb']['project'],
+          config=self.config)
         
         for epoch in tqdm(range(self.epochs)):
 
@@ -210,8 +201,6 @@ class ZeViPo():
 
             self.scheduler.step()
 
-            #if (epoch+1) % 10 == 0:
-            #    self.scheduler.step()
             continue
 
             self.model.eval()
@@ -221,7 +210,7 @@ class ZeViPo():
 
             logger.flush()
         
-        #wandb.finish()    
+        wandb.finish()    
 
 if __name__ == '__main__':
     tracker = ZeViPo('configs/config.yml')

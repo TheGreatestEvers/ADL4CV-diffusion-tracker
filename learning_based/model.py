@@ -1,18 +1,15 @@
 import torch
-from torchvision.transforms.functional import resize 
+import torch.nn.functional as F
 from algorithms.heatmap_generator import HeatmapGenerator
 from algorithms.heatmap_processor import HeatmapProcessor
-from algorithms.feature_extraction_loading import concatenate_video_features
-import torch.nn.functional as F
 
-class LearnUpsampleModel(torch.nn.Module):
+class FeatureDictProcessor(torch.nn.Module):
+    """
+    Process feature dictionary and return one refined feature tensor.
+    """
+
     def __init__(self, feature_dict):
         super().__init__()
-
-        self.heatmap_generator = HeatmapGenerator()
-        self.heatmap_processor = HeatmapProcessor()
-
-        self.softmax = torch.nn.Softmax()
 
         self.relu = torch.nn.ReLU()
 
@@ -113,13 +110,53 @@ class LearnUpsampleModel(torch.nn.Module):
         features = self.relu(features)
         features = torch.permute(features, (1, 0, 2, 3)) # F, C, H, W
 
-        assert features.shape[-1] == 256
-    
-        
-        ### Tracking
-        
-        heatmaps = self.heatmap_generator.generate(features, query_points)
+        return features
 
-        points, occlusions = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+class TrackingModel(torch.nn.Module):
+    """
+    Stepwise tracking
+    """
 
-        return points, occlusions
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.heatmap_generator = HeatmapGenerator()
+        self.heatmap_processor = HeatmapProcessor()
+
+    def forward(self, features, query):
+        """
+        Features: FxCxHxW
+        Query: 1x3
+        """
+
+        # Throw away frames prior to query
+        t = query[0, 0].long()
+
+        features = features[t:]
+        query[0, 0] -= t # Query is in first frame of modified feature tensor
+
+        F = features.shape[0]
+
+        points = torch.zeros(F, 2)
+        points[0] = query[0, 0]
+
+        for i in range(F-1):
+            
+            feat_t0 = features[i]
+            feat_t1 = features[i+1]
+
+            feat_consecutive_frames = torch.cat((feat_t0, feat_t1))
+
+            heatmap = self.heatmap_generator.generate(feat_consecutive_frames, query)
+
+            point, _ = self.heatmap_processor.predictions_from_heatmap(heatmap)[1]
+
+            points[i+1] = point
+
+            # Set new query point to last predicted point
+            query[0, 0] = point
+        
+        return points
+
+
+
