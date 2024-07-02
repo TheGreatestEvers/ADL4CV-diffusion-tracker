@@ -52,55 +52,55 @@ class FeatureDictProcessor(torch.nn.Module):
         ### Process features
 
         # Spatial: 4
-        features = self.conv1d_mid4(feature_dict["mid_block"][0]) \
-            + self.conv1d_down4_2(feature_dict["down_block"][3]) \
-            + self.conv1d_down4_1(feature_dict["down_block"][2])
+        features = self.conv1d_mid4(feature_dict["mid_block"][0].float()) \
+            + self.conv1d_down4_2(feature_dict["down_block"][3].float()) \
+            + self.conv1d_down4_1(feature_dict["down_block"][2].float())
 
         # Spatial 8        
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         #features = self.upsample_4_to_8(features)
 
         features = features \
-            + self.conv1d_up8(feature_dict["up_block"][0]) \
-            + self.conv1d_down8(feature_dict["down_block"][1]) 
+            + self.conv1d_up8(feature_dict["up_block"][0].float()) \
+            + self.conv1d_down8(feature_dict["down_block"][1].float()) 
         
         # Spatial 16
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_8_to_16(features)
 
         features = features \
-            + self.conv1d_up16(feature_dict["up_block"][1]) \
-            + self.conv1d_down16(feature_dict["down_block"][0])
+            + self.conv1d_up16(feature_dict["up_block"][1].float()) \
+            + self.conv1d_down16(feature_dict["down_block"][0].float())
         
         # Spatial 32
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_16_to_32(features)
 
         features = features \
-            + self.conv1d_up32_1(feature_dict["up_block"][2]) \
-            + self.conv1d_up32_2(feature_dict["up_block"][3])
+            + self.conv1d_up32_1(feature_dict["up_block"][2].float()) \
+            + self.conv1d_up32_2(feature_dict["up_block"][3].float())
         
         # Spatial 64
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_32_to_64(features)
 
         features = features \
-            + self.conv1d_dec64(feature_dict["decoder_block"][0])
+            + self.conv1d_dec64(feature_dict["decoder_block"][0].float())
         
         # Spatial 128
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_64_to_128(features)
 
         features = features \
-            + self.conv1d_dec128(feature_dict["decoder_block"][1])
+            + self.conv1d_dec128(feature_dict["decoder_block"][1].float())
         
         # Spatial 256
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_128_to_256(features)
 
         features = features \
-            + self.conv1d_dec256_1(feature_dict["decoder_block"][2]) \
-            + self.conv1d_dec256_2(feature_dict["decoder_block"][3])
+            + self.conv1d_dec256_1(feature_dict["decoder_block"][2].float()) \
+            + self.conv1d_dec256_2(feature_dict["decoder_block"][3].float())
         
         # Refine
         features = torch.permute(features, (1, 0, 2, 3)) # C, F, H, W
