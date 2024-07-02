@@ -9,6 +9,7 @@ from algorithms.feature_extraction_loading import FeatureDataset
 from algorithms.utils import read_config_file, feature_collate_fn
 from evaluation.evaluation_datasets import compute_tapvid_metrics
 from learning_based.model import FeatureDictProcessor, TrackingModel
+from learning_based.learn_upsample_model import LearnUpsampleModel
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
@@ -75,7 +76,7 @@ class SelfsupervisedDiffusionTracker():
 
         F = feature_dict["up_block"][1].shape[0]
 
-        for seq_end in range(1, F):
+        for seq_end in range(2, F):
             seq_feat_dict = {key: [tensor[:seq_end].to(device) for tensor in value] for key, value in feature_dict.items()}
 
             yield seq_feat_dict
@@ -150,7 +151,12 @@ class SelfsupervisedDiffusionTracker():
         data = self.dataset[0]
         
         feature_dict = data["features"]
-        target_points = torch.tensor(data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)
+        feature_dict = data['features']
+        for block_name, block_feat_list in feature_dict.items():
+            for i in range(len(block_feat_list)):
+                feature_dict[block_name][i] = feature_dict[block_name][i].to(dtype=torch.float32).to(device)
+
+        target_points = torch.tensor(data["target_points"][..., [1, 0]], dtype=torch.float32, device=device, requires_grad=False)
         occluded = torch.tensor(data["occluded"], dtype=torch.float32, device=device)
         query_points = torch.tensor(data["query_points"], dtype=torch.float32, device=device)
 
@@ -176,9 +182,13 @@ class SelfsupervisedDiffusionTracker():
             loss_skip_running = torch.zeros(1).to(device)
             loss_feature_comparison_running = torch.zeros(1).to(device)
 
-            self.optimizer.zero_grad()
+            
 
             for sequence_feat_dict in self.sequence_loader(feature_dict):
+                sequence_length = sequence_feat_dict["up_block"][0].shape[0]
+                print("sequence length: " + str(sequence_length))
+
+                self.optimizer.zero_grad()
 
                 features = self.feature_processor(sequence_feat_dict)
 
@@ -189,10 +199,15 @@ class SelfsupervisedDiffusionTracker():
                 loss_long = self.loss_long(query_points, pred_points[:, -1], reversed_features)
                 # loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])
                 # loss_feature_comparison = self.loss_feature_comparison(features, query_points, pred_points[:, -1])
+                # loss_long = self.mse(pred_points, target_points[:, :sequence_length])
 
-                loss_long_running += loss_long
                 # loss_skip_running += loss_skip
                 # loss_feature_comparison_running += loss_feature_comparison
+
+                print(torch.cuda.memory_summary())
+
+                loss_long.backward()
+                self.optimizer.step()
             
             # Optical flow loss
             # loss_of = self.loss_of(video, pred_points)
@@ -201,16 +216,14 @@ class SelfsupervisedDiffusionTracker():
             #      + 1/4 * loss_skip_running \
             #      + 1/4 * loss_feature_comparison_running \
             #      + 1/4 * loss_of
-            loss = loss_long
             
             wandb.log({"loss_long": loss_long})
             # wandb.log({"loss_skip": loss_skip})
             # wandb.log({"loss_feature_comparison": loss_feature_comparison})
             # wandb.log({"loss_of": loss_of})
-            wandb.log({"loss": loss})
+            # wandb.log({"loss": loss})
             
-            loss.backward()
-            self.optimizer.step()
+            
 
             ## Eval
             if iter % 50 == 0 and iter > 1:

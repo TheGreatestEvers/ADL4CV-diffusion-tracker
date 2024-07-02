@@ -137,6 +137,7 @@ class TrackingModel(torch.nn.Module):
         tracks = torch.zeros(N, F, 2).to(features.device)
         tracks[:, 0] = query_points[:, 0]
 
+        new_query_points = query_points
         for i in range(F-1):
             
             feat_t0 = features[i]
@@ -144,14 +145,14 @@ class TrackingModel(torch.nn.Module):
 
             feat_consecutive_frames = torch.stack((feat_t0, feat_t1))
 
-            heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, query_points)
+            heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, new_query_points)
 
             points, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
 
             tracks[:, i+1] = points[:, 1]
 
             # Set new query point to last predicted point, but keep t=0
-            query_points[:, 1:] = points[:, 1, 1:]
+            new_query_points = torch.cat((torch.zeros(N, 1, device=points.device), points[:, 1, :]), dim=1)
         
         return tracks
 
