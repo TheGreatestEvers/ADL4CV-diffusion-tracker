@@ -123,40 +123,37 @@ class TrackingModel(torch.nn.Module):
         self.heatmap_generator = HeatmapGenerator()
         self.heatmap_processor = HeatmapProcessor()
 
-    def forward(self, features, query):
+    def forward(self, features, query_points):
         """
         Features: FxCxHxW
-        Query: 1x3
+        Query: Nx3
         """
 
-        # Throw away frames prior to query
-        t = query[0, 0].long()
-
-        features = features[t:]
-        query[0, 0] -= t # Query is in first frame of modified feature tensor
+        assert torch.all(query_points[:, 0] == 0), "Only query points in first frame are supported"
 
         F = features.shape[0]
 
-        points = torch.zeros(F, 2)
-        points[0] = query[0, 0]
+        N = query_points.shape[0]
+        tracks = torch.zeros(N, F, 2)
+        tracks[:, 0] = query_points[:, 0]
 
         for i in range(F-1):
             
             feat_t0 = features[i]
             feat_t1 = features[i+1]
 
-            feat_consecutive_frames = torch.cat((feat_t0, feat_t1))
+            feat_consecutive_frames = torch.stack((feat_t0, feat_t1))
 
-            heatmap = self.heatmap_generator.generate(feat_consecutive_frames, query)
+            heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, query_points)
 
-            point, _ = self.heatmap_processor.predictions_from_heatmap(heatmap)[1]
+            points, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
 
-            points[i+1] = point
+            tracks[:, i+1] = points[:, 1]
 
-            # Set new query point to last predicted point
-            query[0, 0] = point
+            # Set new query point to last predicted point, but keep t=0
+            query_points[:, 1:] = points[:, 1, 1:]
         
-        return points
+        return tracks
 
 
 

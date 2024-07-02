@@ -46,19 +46,7 @@ class SelfsupervisedDiffusionTracker():
 
         self.dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
 
-        data = self.dataset[0]
-        
-        target_points = torch.tensor(data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)
-        occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
-        query = torch.tensor(data["query_points"], dtype=torch.float32, device=device)
-
-        self.feature_dict = data["feature_dict"]
-        self.video = self.preprocess_video(data["video"])
-        self.target_points = target_points
-        self.occluded = occluded
-        self.query = query
-
-        self.feature_processor = FeatureDictProcessor(self.feature_dict)
+        self.feature_processor = FeatureDictProcessor(self.dataset[0]["features"])
         self.track_model = TrackingModel()
 
         params = [self.feature_processor.parameters(), self.track_model.parameters()]
@@ -80,15 +68,15 @@ class SelfsupervisedDiffusionTracker():
 
         return video_tensor
 
-    def sequence_loader(self):
+    def sequence_loader(self, feature_dict):
         """
         Yield feat dict for sequences of frames. Sequence lengths: 2, 3, ..., F
         """
 
-        F = self.feature_dict["up_block"][1].shape[0]
+        F = feature_dict["up_block"][1].shape[0]
 
         for seq_end in range(1, F):
-            seq_feat_dict = {key: [tensor[:seq_end] for tensor in value] for key, value in self.feature_dict.items()}
+            seq_feat_dict = {key: [tensor[:seq_end] for tensor in value] for key, value in feature_dict.items()}
 
             yield seq_feat_dict
 
@@ -126,15 +114,15 @@ class SelfsupervisedDiffusionTracker():
 
         return -torch.dot(f1, f2)
 
-    def loss_of(self, pred_points):
+    def loss_of(self, video, pred_points):
         """
         Optical Flow loss.
         """
 
         running_loss = torch.zero(1)
-        for i in range(self.video.shape[0] - 1):
-            frame1 = self.video[i]
-            frame2 = self.video[i + 1]
+        for i in range(video.shape[0] - 1):
+            frame1 = video[i]
+            frame2 = video[i + 1]
 
             flow_low, flow_up = self.of_raft(frame1, frame2, iters=20, test_mode=True)
 
@@ -154,6 +142,15 @@ class SelfsupervisedDiffusionTracker():
         wandb.init(entity=self.config['wandb']['entity'],
           project=self.config['wandb']['project'],
           config=self.config)
+        
+        data = self.dataset[0]
+        
+        feature_dict = data["features"]
+        target_points = torch.tensor(data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)
+        occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
+        query_points = torch.tensor(data["query_points"], dtype=torch.float32, device=device)
+        
+        video = self.preprocess_video(data["video"])
 
         total_iterations = self.config["total_iterations"]
 
@@ -167,26 +164,26 @@ class SelfsupervisedDiffusionTracker():
             loss_skip_running = torch.zeros(1)
             loss_feature_comparison_running = torch.zeros(1)
 
-            for s, (query, sequence_feat_dict) in enumerate(self.sequence_loader):
+            self.optimizer.zero_grad()
 
-                self.optimizer.zero_grad()
+            for sequence_feat_dict in enumerate(self.sequence_loader(feature_dict)):
 
                 features = self.feature_processor(sequence_feat_dict)
 
-                pred_points = self.track_model(features, query)
+                pred_points = self.track_model(features, query_points) # NxFx2
 
                 reversed_features = torch.flip(features, dims=0)
 
-                loss_long = self.loss_long(query[0], pred_points[-1], reversed_features)
-                loss_skip = self.loss_skip(query[0], pred_points[-1], reversed_features[(0, -1), ...])
-                loss_feature_comparison = self.loss_feature_comparison(features, query[0], pred_points[-1])
+                loss_long = self.loss_long(query_points, pred_points[:, -1], reversed_features)
+                loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])
+                loss_feature_comparison = self.loss_feature_comparison(features, query_points, pred_points[:, -1])
 
                 loss_long_running += loss_long
                 loss_skip_running += loss_skip
                 loss_feature_comparison_running += loss_feature_comparison
             
             # Optical flow loss
-            loss_of = self.loss_of(pred_points)
+            loss_of = self.loss_of(video, pred_points)
 
             loss = 1/4 * loss_long_running \
                  + 1/4 * loss_skip_running \
@@ -200,7 +197,6 @@ class SelfsupervisedDiffusionTracker():
             wandb.log({"loss": loss})
             
             loss.backward()
-
             self.optimizer.step()
 
             ## Eval
@@ -208,11 +204,11 @@ class SelfsupervisedDiffusionTracker():
                 self.feature_processor.eval()
                 self.track_model.eval()
 
-                features = self.feature_processor(sequence_feat_dict)
-                pred_points = self.track_model(features, query)
+                features = self.feature_processor(feature_dict)
+                pred_points = self.track_model(features, query_points)
 
                 pred_points = pred_points * (1 - self.occluded).unsqueeze(-1)
-                eval_loss = self.mse(self.target_points, pred_points)
+                eval_loss = self.mse(target_points, pred_points)
 
                 wandb.log({"loss": eval_loss})
 
