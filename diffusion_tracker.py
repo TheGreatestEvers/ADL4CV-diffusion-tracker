@@ -80,30 +80,34 @@ class SelfsupervisedDiffusionTracker():
 
             yield seq_feat_dict
 
-    def loss_long(self, og_query_point, pred_endpoint, reverse_feat_dict):
+    def loss_long(self, og_query_points, pred_endpoints, reverse_feat_dict):
         """
         Use predicted point at end of sequence as new query point. Goal is to predict original query point. Stepwise
         over all frames.
         """
 
-        pred = self.model(reverse_feat_dict, pred_endpoint)
-        loss_long = self.mse(og_query_point, pred)
+        N = pred_endpoints.shape[0]
 
-        # Maybe also add loss comparison of both feature vectors
+        prepended_zeros = torch.zeros(N, 1)
+        new_queries = torch.cat((prepended_zeros, pred_endpoints), dim=1)
+        pred = self.track_model(reverse_feat_dict, new_queries)
+        loss_long = self.mse(og_query_points[:, 1:], pred[:, -1])
 
         return loss_long
     
-    def loss_skip(self, og_query_point, pred_endpoint, reverse_slim_feat_dict):
+    def loss_skip(self, og_query_points, pred_endpoints, reverse_slim_feat_dict):
         """
         Use predicted point at end of sequence as new query point. Goal is to predict original query point.
 
         Slim feature dict is in reversed frame order, so it contains the last sequence frame and then the first sequence frame.
         """
 
-        pred = self.model(reverse_slim_feat_dict, pred_endpoint)
-        loss_skip = self.mse(og_query_point, pred)
+        N = pred_endpoints.shape[0]
 
-        # Maybe also add loss comparison of both feature vectors
+        prepended_zeros = torch.zeros(N, 1)
+        new_queries = torch.cat((prepended_zeros, pred_endpoints), dim=1)
+        pred = self.model(reverse_slim_feat_dict, new_queries)
+        loss_skip = self.mse(og_query_points[:, 1:], pred[:, -1])
 
         return loss_skip
 
@@ -175,25 +179,26 @@ class SelfsupervisedDiffusionTracker():
                 reversed_features = torch.flip(features, dims=0)
 
                 loss_long = self.loss_long(query_points, pred_points[:, -1], reversed_features)
-                loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])
-                loss_feature_comparison = self.loss_feature_comparison(features, query_points, pred_points[:, -1])
+                # loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])
+                # loss_feature_comparison = self.loss_feature_comparison(features, query_points, pred_points[:, -1])
 
                 loss_long_running += loss_long
-                loss_skip_running += loss_skip
-                loss_feature_comparison_running += loss_feature_comparison
+                # loss_skip_running += loss_skip
+                # loss_feature_comparison_running += loss_feature_comparison
             
             # Optical flow loss
-            loss_of = self.loss_of(video, pred_points)
+            # loss_of = self.loss_of(video, pred_points)
 
-            loss = 1/4 * loss_long_running \
-                 + 1/4 * loss_skip_running \
-                 + 1/4 * loss_feature_comparison_running \
-                 + 1/4 * loss_of
+            # loss = 1/4 * loss_long_running \
+            #      + 1/4 * loss_skip_running \
+            #      + 1/4 * loss_feature_comparison_running \
+            #      + 1/4 * loss_of
+            loss = loss_long
             
             wandb.log({"loss_long": loss_long})
-            wandb.log({"loss_skip": loss_skip})
-            wandb.log({"loss_feature_comparison": loss_feature_comparison})
-            wandb.log({"loss_of": loss_of})
+            # wandb.log({"loss_skip": loss_skip})
+            # wandb.log({"loss_feature_comparison": loss_feature_comparison})
+            # wandb.log({"loss_of": loss_of})
             wandb.log({"loss": loss})
             
             loss.backward()
