@@ -46,10 +46,10 @@ class SelfsupervisedDiffusionTracker():
 
         self.dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
 
-        self.feature_processor = FeatureDictProcessor(self.dataset[0]["features"])
-        self.track_model = TrackingModel()
+        self.feature_processor = FeatureDictProcessor(self.dataset[0]["features"]).to(device)
+        self.track_model = TrackingModel().to(device)
 
-        params = [self.feature_processor.parameters(), self.track_model.parameters()]
+        params = list(self.feature_processor.parameters()) + list(self.track_model.parameters())
         self.optimizer = torch.optim.Adam(params, lr=self.config['learning_rate'])        
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=30, gamma=0.99)
 
@@ -61,12 +61,12 @@ class SelfsupervisedDiffusionTracker():
         Preprocesses frames of video to be applicable to RAFT optical flow model.
         Video is numpy array
         """
-
+        print(video.shape)
         video = video / 255.0
-        frames = frames.transpose(0, 3, 1, 2)
-        video_tensor = torch.tensor(frames, dtype=torch.float32)
+        video = video.transpose(0, 3, 1, 2)
+        video = torch.tensor(video, dtype=torch.float32)
 
-        return video_tensor
+        return video
 
     def sequence_loader(self, feature_dict):
         """
@@ -76,7 +76,7 @@ class SelfsupervisedDiffusionTracker():
         F = feature_dict["up_block"][1].shape[0]
 
         for seq_end in range(1, F):
-            seq_feat_dict = {key: [tensor[:seq_end] for tensor in value] for key, value in feature_dict.items()}
+            seq_feat_dict = {key: [tensor[:seq_end].to(device) for tensor in value] for key, value in feature_dict.items()}
 
             yield seq_feat_dict
 
@@ -88,7 +88,7 @@ class SelfsupervisedDiffusionTracker():
 
         N = pred_endpoints.shape[0]
 
-        prepended_zeros = torch.zeros(N, 1)
+        prepended_zeros = torch.zeros(N, 1).to(device)
         new_queries = torch.cat((prepended_zeros, pred_endpoints), dim=1)
         pred = self.track_model(reverse_feat_dict, new_queries)
         loss_long = self.mse(og_query_points[:, 1:], pred[:, -1])
@@ -104,7 +104,7 @@ class SelfsupervisedDiffusionTracker():
 
         N = pred_endpoints.shape[0]
 
-        prepended_zeros = torch.zeros(N, 1)
+        prepended_zeros = torch.zeros(N, 1).to(device)
         new_queries = torch.cat((prepended_zeros, pred_endpoints), dim=1)
         pred = self.model(reverse_slim_feat_dict, new_queries)
         loss_skip = self.mse(og_query_points[:, 1:], pred[:, -1])
@@ -151,10 +151,18 @@ class SelfsupervisedDiffusionTracker():
         
         feature_dict = data["features"]
         target_points = torch.tensor(data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)
-        occluded = torch.tensor(occluded, dtype=torch.float32, device=device)
+        occluded = torch.tensor(data["occluded"], dtype=torch.float32, device=device)
         query_points = torch.tensor(data["query_points"], dtype=torch.float32, device=device)
+
+        ### Singe point only
+        target_points = target_points[0,0].unsqueeze(0)
+        occluded = occluded[0,0].unsqueeze(0)
+        query_points = query_points[0,0].unsqueeze(0)
+        print(target_points.shape)
+        print(occluded.shape)
+        print(query_points.shape)
         
-        video = self.preprocess_video(data["video"])
+        video = self.preprocess_video(data["video"][0])
 
         total_iterations = self.config["total_iterations"]
 
@@ -164,19 +172,19 @@ class SelfsupervisedDiffusionTracker():
             self.feature_processor.train()
             self.track_model.train()
 
-            loss_long_running = torch.zeros(1)
-            loss_skip_running = torch.zeros(1)
-            loss_feature_comparison_running = torch.zeros(1)
+            loss_long_running = torch.zeros(1).to(device)
+            loss_skip_running = torch.zeros(1).to(device)
+            loss_feature_comparison_running = torch.zeros(1).to(device)
 
             self.optimizer.zero_grad()
 
-            for sequence_feat_dict in enumerate(self.sequence_loader(feature_dict)):
+            for sequence_feat_dict in self.sequence_loader(feature_dict):
 
                 features = self.feature_processor(sequence_feat_dict)
 
                 pred_points = self.track_model(features, query_points) # NxFx2
 
-                reversed_features = torch.flip(features, dims=0)
+                reversed_features = torch.flip(features, dims=[0])
 
                 loss_long = self.loss_long(query_points, pred_points[:, -1], reversed_features)
                 # loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])

@@ -47,7 +47,7 @@ class FeatureDictProcessor(torch.nn.Module):
         self.refine_conv2 = torch.nn.Conv3d(64, 64, 3, padding=1) # Make this maintain spatial size
 
 
-    def forward(self, feature_dict, query_points):
+    def forward(self, feature_dict):
 
         ### Process features
 
@@ -134,7 +134,7 @@ class TrackingModel(torch.nn.Module):
         F = features.shape[0]
 
         N = query_points.shape[0]
-        tracks = torch.zeros(N, F, 2)
+        tracks = torch.zeros(N, F, 2).to(features.device)
         tracks[:, 0] = query_points[:, 0]
 
         for i in range(F-1):
