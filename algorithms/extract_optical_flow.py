@@ -129,3 +129,13 @@ if __name__ == "__main__":
         point_pair = [(point_pair[0][1], point_pair[0][2]), (point_pair[1][1], point_pair[1][2])]
     
         plot_images_with_points(images, point_pair)
+
+    query_points = []
+    endpoints = []
+
+    for point_pair in point_pairs:
+        query_points.append(point_pair[0])
+        endpoints.append(point_pair[1])
+
+    query_points = torch.stack(query_points)
+    endpoints = torch.stack(endpoints)
