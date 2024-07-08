@@ -123,7 +123,7 @@ class TrackingModel(torch.nn.Module):
         self.heatmap_generator = HeatmapGenerator()
         self.heatmap_processor = HeatmapProcessor()
 
-    def forward(self, features, query_points):
+    def forward_stepwise(self, features, query_points):
         """
         Features: FxCxHxW
         Query: Nx3
@@ -135,16 +135,17 @@ class TrackingModel(torch.nn.Module):
 
         N = query_points.shape[0]
         tracks = torch.zeros(N, F, 2).to(features.device)
-        tracks[:, 0] = query_points[:, 0]
+        tracks[:, 0] = query_points[:, 1:]
 
+        new_query_points = query_points
         new_query_points = query_points
         for i in range(F-1):
             
             feat_t0 = features[i]
             feat_t1 = features[i+1]
-
             feat_consecutive_frames = torch.stack((feat_t0, feat_t1))
 
+            heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, new_query_points)
             heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, new_query_points)
 
             points, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
@@ -152,8 +153,15 @@ class TrackingModel(torch.nn.Module):
             tracks[:, i+1] = points[:, 1]
 
             # Set new query point to last predicted point, but keep t=0
-            new_query_points = torch.cat((torch.zeros(N, 1, device=points.device), points[:, 1, :]), dim=1)
+            new_query_points = torch.cat((torch.zeros(N,1, device=points.device), points[:, 1]), dim=1)
         
+        return tracks
+
+    def forward_skip(self, features, query_points):
+
+        heatmaps = self.heatmap_generator.generate(features, query_points)
+        tracks, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+
         return tracks
 
 
