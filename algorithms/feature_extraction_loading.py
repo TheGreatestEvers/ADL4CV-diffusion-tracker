@@ -135,7 +135,7 @@ def extract_diffusion_features(
 
     datasets = {}
     
-    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=enable_vae_slicing)
+    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=False)
     
     if 'davis' in input_dataset_paths.keys():
         datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])

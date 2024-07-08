@@ -75,7 +75,7 @@ class SelfsupervisedDiffusionTracker():
 
         F = feature_dict["up_block"][1].shape[0]
 
-        for seq_end in range(1, F):
+        for seq_end in range(2, F):
             seq_feat_dict = {key: [tensor[:seq_end].to(device) for tensor in value] for key, value in feature_dict.items()}
 
             yield seq_feat_dict
@@ -143,9 +143,9 @@ class SelfsupervisedDiffusionTracker():
         return running_loss
 
     def train(self):
-        wandb.init(entity=self.config['wandb']['entity'],
-          project=self.config['wandb']['project'],
-          config=self.config)
+        # wandb.init(entity=self.config['wandb']['entity'],
+        #   project=self.config['wandb']['project'],
+        #   config=self.config)
         
         data = self.dataset[0]
         
@@ -169,23 +169,25 @@ class SelfsupervisedDiffusionTracker():
         for iter in tqdm(range(total_iterations)):
 
             ## Train
-            self.feature_processor.train()
-            self.track_model.train()
+            # self.feature_processor.train()
+            # self.track_model.train()
 
             loss_long_running = torch.zeros(1).to(device)
             loss_skip_running = torch.zeros(1).to(device)
             loss_feature_comparison_running = torch.zeros(1).to(device)
 
-            self.optimizer.zero_grad()
+            for i, sequence_feat_dict in enumerate(self.sequence_loader(feature_dict)):
 
-            for sequence_feat_dict in self.sequence_loader(feature_dict):
+                print("hallo")
+
+                self.optimizer.zero_grad()
 
                 features = self.feature_processor(sequence_feat_dict)
 
                 pred_points = self.track_model(features, query_points) # NxFx2
 
                 reversed_features = torch.flip(features, dims=[0])
-
+        
                 loss_long = self.loss_long(query_points, pred_points[:, -1], reversed_features)
                 # loss_skip = self.loss_skip(query_points, pred_points[:, -1], reversed_features[(0, -1), ...])
                 # loss_feature_comparison = self.loss_feature_comparison(features, query_points, pred_points[:, -1])
@@ -193,6 +195,9 @@ class SelfsupervisedDiffusionTracker():
                 loss_long_running += loss_long
                 # loss_skip_running += loss_skip
                 # loss_feature_comparison_running += loss_feature_comparison
+
+                loss_long.backward()
+                self.optimizer.step()
             
             # Optical flow loss
             # loss_of = self.loss_of(video, pred_points)
@@ -203,14 +208,14 @@ class SelfsupervisedDiffusionTracker():
             #      + 1/4 * loss_of
             loss = loss_long
             
-            wandb.log({"loss_long": loss_long})
+            #wandb.log({"loss_long": loss_long})
             # wandb.log({"loss_skip": loss_skip})
             # wandb.log({"loss_feature_comparison": loss_feature_comparison})
             # wandb.log({"loss_of": loss_of})
-            wandb.log({"loss": loss})
+            #wandb.log({"loss": loss})
             
-            loss.backward()
-            self.optimizer.step()
+            #loss.backward()
+            #self.optimizer.step()
 
             ## Eval
             if iter % 50 == 0 and iter > 1:
@@ -225,7 +230,7 @@ class SelfsupervisedDiffusionTracker():
 
                 wandb.log({"loss": eval_loss})
 
-        wandb.finish()    
+        #wandb.finish()    
 
 
 if __name__ == "__main__":

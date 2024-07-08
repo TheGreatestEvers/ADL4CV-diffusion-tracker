@@ -114,3 +114,82 @@ class HeatmapProcessor(torch.nn.Module):
         points = torch.sum(grid.float() * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
         
         return points
+
+
+class FixedHeatmapProcessor(torch.nn.Module):
+    """
+    Process heatmap and obtain estimation for tracks and occluded points
+    """
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.argmax_radius = 34
+        self.softmax = torch.nn.Softmax(dim=-1)
+
+    def predictions_from_heatmap(self, heatmaps):
+        """
+        Get track estimates in each frame.
+
+        Args:
+            heatmaps: Heatmaps with Dimensions: [NumPoints, Frames, Height, Width]
+
+        Returns:
+            tracks: Tensor containing xy coordinate of each estimated point in each frame. Dimensions: [NumPoints, Frames, 2]
+        """
+
+        N, F, H, W = heatmaps.shape
+
+        heatmaps = torch.flatten(heatmaps, start_dim=2)
+        heatmaps = self.softmax(heatmaps)
+
+        argmax_flat = torch.argmax(heatmaps.squeeze(), dim=-1)
+        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+
+        points = self.soft_argmax(heatmaps.view(N*F, H, W), argmax_indices.view(N*F, 2))
+        points = points.view(N, F, -1)
+
+        # Occlusion inference
+        occlusions = torch.zeros(1)
+        
+        return points, occlusions
+
+    def soft_argmax(self, heatmap, argmax_indices):
+        """
+        Computes soft argmax.
+
+        Args:
+            heatmap: Tensor with shape [Points*Frames, Height, Width]
+            argmax_indices: Hard argmax indices. Tensor with shape [Frames, 2]
+        
+        Returns:
+            Soft argmax indices. Tensor with shape [Frames, 2]
+        """
+
+        F, H, W = heatmap.shape
+
+        # Create grid of shape FxHxWx2
+        grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
+        grid_y = grid_y.unsqueeze(0).expand(F, -1, -1).float()
+        grid_x = grid_x.unsqueeze(0).expand(F, -1, -1).float()
+        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
+
+        # Generate mask of a circle of radius radius around the argmax
+        mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)), dim=-1) <= self.argmax_radius # shape (B, H, W)
+
+        # Apply mask and get sums
+        heatmap = heatmap * mask
+        hm_sum = torch.sum(heatmap, dim=(1, 2)) # F
+        hm_zero_indices = hm_sum < 1e-8
+        
+        # for numerical stability
+        if sum(hm_zero_indices) > 0:
+            uniform_w = 1 / mask[hm_zero_indices].sum(dim=(1,2))
+            heatmap[hm_zero_indices] += uniform_w[:, None, None]
+            heatmap[hm_zero_indices] = heatmap[hm_zero_indices] * mask[hm_zero_indices]
+            hm_sum[hm_zero_indices] = torch.sum(heatmap[hm_zero_indices], dim=(1, 2))
+
+        points = torch.sum(grid.float() * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
+        
+        return points
+
