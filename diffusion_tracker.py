@@ -133,6 +133,10 @@ class SelfsupervisedDiffusionTracker():
             ## Train
             self.track_model.train()
 
+            loss_long_running = torch.zeros(1).to(device)
+            loss_skip_running = torch.zeros(1).to(device)
+            loss_feature_comparison_running = torch.zeros(1).to(device)
+
             self.optimizer.zero_grad()
 
             running_loss = torch.zeros(1).to(device)
