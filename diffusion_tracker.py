@@ -12,8 +12,16 @@ from learning_based.model import FeatureDictProcessor, TrackingModel
 from learning_based.residual_block import ResidualFeatureBlock
 import time
 import torch.nn.functional as func
+from algorithms.extract_optical_flow import extract_optical_flow_pairs, preprocess_video
+from info_nce import InfoNCE
+from evaluation.visualization import visualize_heatmaps
+from math import ceil
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
+
+N_FRAMES = 32
+N_POINTS = 24
+N_CHANNELS = 64
 
 def extract_bilinearly(tensor, loc):
     # Tensor has shape CxHxW
@@ -51,22 +59,78 @@ class SelfsupervisedDiffusionTracker():
         self.data = dataset[0]
         feature = torch.load("swan_feature_tensor.pt").to(device) # fix
 
-        F,C,H,W = feature.shape
-        feature = feature.permute((0, 2, 3, 1)).contiguous().view(F*H,W,C)
-        feature = func.interpolate(feature, size=64)
-        feature = feature.view(F,H,W,64).permute(0,3,1,2)
+        # F,C,H,W = feature.shape
+        # feature = feature.permute((0, 2, 3, 1)).contiguous().view(F*H,W,C)
+        # feature = func.interpolate(feature, size=64)
+        # feature = feature.view(F,H,W,64).permute(0,3,1,2)
+
+        # min_val = torch.min(feature)
+        # max_val = torch.max(feature)
+
+        # # Normalize the tensor to the range [0, 1]
+        # feature = (feature - min_val) / (max_val - min_val)
 
         self.data["features"] = feature
 
         self.track_model = TrackingModel().to(device)
-        self.residual_block = ResidualFeatureBlock(intermediate_channels=[32], n_output_channels=64).to(device)
+        self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=N_CHANNELS).to(device)
 
         params = list(self.track_model.parameters()) + list(self.residual_block.parameters())
-        self.optimizer = torch.optim.Adam(params, lr=self.config['learning_rate'])        
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=30, gamma=0.99)
+        self.optimizer = torch.optim.AdamW(params, lr=self.config['learning_rate'])        
+        #self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.95)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 10, 0.8)
 
         self.mse = torch.nn.MSELoss()
         self.huber = torch.nn.HuberLoss()
+        self.loss_fn_infonce = InfoNCE(negative_mode='paired')
+
+    def contrastive_loss(self, query_points, target_points, features):
+        F, C, H, W = features.shape
+        N, _ = query_points.shape
+
+        query_features = features[query_points[:,0].to(dtype=int), :, query_points[:,1].to(dtype=int), query_points[:,2].to(dtype=int)]
+        target_features = features[target_points[:,0].to(dtype=int), :, target_points[:,1].to(dtype=int), target_points[:,2].to(dtype=int)]
+
+        # Get negative features
+        #negative_features = features[target_points[:,0].to(dtype=int)].permute(0, 2, 3, 1)
+
+        # Create a mask to exclude target points
+        #mask = torch.ones(N, H, W, dtype=torch.bool, device=features.device)
+        #mask[torch.arange(N), target_points[:,1].to(dtype=int), target_points[:,2].to(dtype=int)] = False
+
+        # Apply the mask and reshape negative features
+        #negative_features = negative_features[mask].view(N, H * W - 1, C)
+
+        negative_features_1 = features[target_points[:,0].to(dtype=int)].permute(0, 2, 3, 1)
+        mask_1 = torch.ones(N, H, W, dtype=torch.bool, device=features.device)
+        mask_1[torch.arange(N), target_points[:,1].to(dtype=int), target_points[:,2].to(dtype=int)] = False
+        negative_features_1 = negative_features_1[mask_1].view(N, H * W - 1, C)
+
+        negative_features_2 = features[query_points[:,0].to(dtype=int)].permute(0, 2, 3, 1)
+        mask_2 = torch.ones(N, H, W, dtype=torch.bool, device=features.device)
+        mask_2[torch.arange(N), query_points[:,1].to(dtype=int), query_points[:,2].to(dtype=int)] = False
+        negative_features_2 = negative_features_2[mask_2].view(N, H * W - 1, C)
+
+        negative_features = torch.cat([negative_features_1, negative_features_2], dim=1)
+
+        loss = self.loss_fn_infonce(query_features, target_features, negative_features)
+
+        return loss
+        
+    def loss_of(self, of_point_pairs, features):
+
+        pred_points = self.track_model.forward_skip(features, of_point_pairs[0]) #NxFx2
+        #of_point_pairs[1][:,0] N
+
+        N, F, _ = pred_points.shape
+
+        #pred_endpoints = pred_points[:, of_point_pairs[1][:, 0].long()]
+        pred_endpoints = torch.gather(pred_points, dim=1, index=of_point_pairs[1][:, 0].unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2).long()).squeeze()
+        #print(pred_endpoints)
+        #print(of_point_pairs[1][:, 1:])
+        loss_of = self.huber(pred_endpoints, of_point_pairs[1][:, 1:])
+
+        return loss_of
 
     def loss_long(self, og_query_points, pred_endpoints, reverse_feat_dict):
         """
@@ -106,6 +170,63 @@ class SelfsupervisedDiffusionTracker():
 
         return -torch.dot(f1, f2)
 
+    def evaluate(self, query_points, target_points, occluded, features, video_tensor):
+
+        batch_query_point = []
+        batch_gt_occluded = []
+        batch_gt_point = []
+        batch_pred_point = []
+
+        self.residual_block.eval()
+        self.track_model.eval()
+        
+        with torch.no_grad():
+            refined_features = features + self.residual_block(video_tensor)
+            heatmaps = self.track_model.heatmap_generator.generate(refined_features, query_points)
+            pred_points, _ = self.track_model.heatmap_processor.predictions_from_heatmap(heatmaps)
+
+        wandb.log({"chart1": visualize_heatmaps(heatmaps[0].cpu(), pred_points[0], target_points[0])})
+        wandb.log({"chart2": visualize_heatmaps(heatmaps[1].cpu(), pred_points[1], target_points[1])})
+        wandb.log({"chart3": visualize_heatmaps(heatmaps[2].cpu(), pred_points[2], target_points[2])})
+        wandb.log({"chart4": visualize_heatmaps(heatmaps[3].cpu(), pred_points[3], target_points[3])})
+
+        batch_pred_point.append(pred_points.cpu().numpy())
+        batch_query_point.append(query_points.cpu().numpy())
+        batch_gt_point.append(target_points.cpu().numpy())
+        batch_gt_occluded.append(occluded.cpu().numpy())
+
+        metrics = compute_tapvid_metrics(query_points=np.array(batch_query_point), gt_occluded=np.array(batch_gt_occluded), gt_tracks=np.array(batch_gt_point), pred_occluded=np.array(batch_gt_occluded), pred_tracks=np.array(batch_pred_point), query_mode='strided')
+        print(metrics)
+
+        self.residual_block.train()
+        self.track_model.train()
+
+        return metrics['average_pts_within_thresh']
+
+    def get_of_point_pair_batch(self, of_point_pair,  batch_size=32, shuffle=True, drop_last=False):
+        """
+        Yields a tuple containing one batch of query_points, target_points, occluded, trackgroup
+        """
+        num_points = of_point_pair[0].shape[0]
+
+        if shuffle:
+            permutation = np.random.permutation(num_points)
+            of_point_pair = (of_point_pair[0][permutation], of_point_pair[1][permutation])
+
+        if drop_last:
+            num_batches = num_points // batch_size
+        else:
+            num_batches = ceil(num_points / batch_size)
+        
+        for i in range(num_batches):
+            start = i*batch_size
+            end = min((i+1)*batch_size, num_points)
+
+            yield (
+                of_point_pair[0][start:end], 
+                of_point_pair[1][start:end],
+            )
+
     def train(self):
 
         wandb.init(entity=self.config['wandb']['entity'],
@@ -115,73 +236,93 @@ class SelfsupervisedDiffusionTracker():
         
         
         features = self.data["features"].to(device)
-        target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)
-        occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)
+        target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
+        occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)[0]
         query_points = torch.tensor(self.data["query_points"], dtype=torch.float32, device=device)[0]
-        query_points = query_points[query_points[:, 0] == 0]
+        #query_points = query_points[query_points[:, 0] == 0]
+        #query_points = query_points[0].unsqueeze(0)
         
         video = self.data["video"][0] / 255.0
         video_tensor = torch.tensor(video, device=device, dtype=torch.float32).permute(0, 3, 1, 2)
+        # video_tensor = preprocess_video(video_tensor)
 
-        features = features[:16]
-        video_tensor = video_tensor[:16]
+        features = features[:N_FRAMES, :N_CHANNELS]
+        video_tensor = video_tensor[:N_FRAMES]
+        query_points = query_points[:N_POINTS]
+        target_points = target_points[:N_POINTS, :N_FRAMES]
+        occluded = occluded[:N_POINTS, :N_FRAMES]
+
+        sampled_of_query_points = torch.rand([N_POINTS//2, 3]) * 255
+        sampled_of_query_points[:,0] = torch.rand([N_POINTS//2]) * N_FRAMES
+
+        of_query_points = torch.cat([query_points[:N_POINTS//2].cpu(), sampled_of_query_points], dim=0)
+
+        of_point_pairs = extract_optical_flow_pairs(video_tensor, query_points)
+
+        # for pair in of_point_pairs:
+        #     print("----------------------- Pair: ----------------------")
+        #     print(pair[0])
+        #     print(pair[1])
+
+        of_query_points = []
+        of_endpoints = []
+        for point_pair in of_point_pairs:
+            of_query_points.append(point_pair[0])
+            of_endpoints.append(point_pair[1])
+        of_query_points = torch.stack(of_query_points).to(device=device)
+        of_endpoints = torch.stack(of_endpoints).to(device=device)
+        of_point_pairs = (of_query_points, of_endpoints)
 
         total_iterations = self.config["total_iterations"]
 
-        for iter in tqdm(range(total_iterations), desc="Train iteration"):
+        #for iter in tqdm(range(total_iterations), desc="Train iteration"):
+        for iter in range(total_iterations):
 
             ## Train
-            self.track_model.train()
+            #self.track_model.train()
+            
+            running_loss = 0
 
-            loss_long_running = torch.zeros(1).to(device)
-            loss_skip_running = torch.zeros(1).to(device)
-            loss_feature_comparison_running = torch.zeros(1).to(device)
+            for of_point_pair_batch in self.get_of_point_pair_batch(of_point_pairs, batch_size=32):
+                self.optimizer.zero_grad()
 
-            self.optimizer.zero_grad()
+                residual_features = self.residual_block(video_tensor)
+                refined_features = features + residual_features
 
-            running_loss = torch.zeros(1).to(device)
+                wandb.log({"residual_features": residual_features.norm(), "features": features.norm()})
 
+                loss = 0.01 * self.loss_of(of_point_pair_batch, refined_features)
+                loss += self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                #pred_points = self.track_model.forward_skip(refined_features, query_points)
+                #running_loss = self.huber(pred_points, target_points)
 
-            refined_features = features + self.residual_block(video_tensor)
-            reversed_refined_features = torch.flip(refined_features, dims=[0])
+                loss.backward()
 
-            pred_points_stepwise = self.track_model.forward_stepwise(refined_features, query_points)
-            pred_points_skip = self.track_model.forward_skip(refined_features, query_points)
+                #norm_res = 0
+                #norm_track = 0
+                norm_res = torch.nn.utils.clip_grad_norm_(self.residual_block.parameters(), 100)
+                norm_track = torch.nn.utils.clip_grad_norm_(self.track_model.parameters(), 100)
+                self.optimizer.step()
+                #self.scheduler.step()
 
-            for i in range(2, refined_features.shape[0]):
+                running_loss += loss
 
-                print(i-2)
-
-                loss_long = self.loss_long(query_points, pred_points_stepwise[:,i-1], reversed_refined_features[-i:])
-                loss_skip = self.loss_skip(query_points, pred_points_skip[:, i-1], reversed_refined_features[(-i, -1), ...])
-
-                running_loss += loss_long + loss_skip
-
-            print(np.array(torch.cuda.mem_get_info()) / 1e9)
-
-            running_loss.backward()
-            self.optimizer.step()
+            print(f"{iter}: loss: {running_loss:.4f} | norm-residual: {norm_res:.4f} | norm-track: {norm_track:.4f}")
             
             wandb.log({"running_loss": running_loss})
-        
 
-            # ## Eval
-            # if iter % 50 == 0 and iter > 1:
-            #     self.feature_processor.eval()
-            #     self.track_model.eval()
+            if iter % self.config['eval_freq'] == 0 and iter > 1:
+                eval_error = self.evaluate(query_points, target_points, occluded, features, video_tensor)
+                wandb.log({"evaluation": eval_error})
 
-            #     features = self.feature_processor(feature_dict)
-            #     pred_points = self.track_model(features, query_points)
 
-            #     pred_points = pred_points * (1 - self.occluded).unsqueeze(-1)
-            #     eval_loss = self.mse(target_points, pred_points)
 
-            #     wandb.log({"loss": eval_loss})
 
         wandb.finish()    
 
 
 if __name__ == "__main__":
+
     dt = SelfsupervisedDiffusionTracker()
     dt.train()
     torch.save(dt.model.state_dict(), 'unsupervised.pth')

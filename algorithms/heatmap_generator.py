@@ -50,7 +50,7 @@ class HeatmapGenerator:
                 norm_feat_vecs = torch.norm(feature_maps, dim=1, keepdim=True)
 
                 heatmap = torch.sum(feature_maps * target_feat_vec.view(1, C, 1, 1), dim=1, keepdim=True) 
-                heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
+                heatmap = heatmap / torch.maximum(norm_target_feat_vec * norm_feat_vecs, 1e-8 * torch.ones_like(norm_feat_vecs))
 
                 heatmaps[i] = heatmap.squeeze()
 

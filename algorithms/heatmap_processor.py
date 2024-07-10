@@ -8,7 +8,7 @@ class HeatmapProcessor(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        self.argmax_radius = 34
+        self.argmax_radius = 35
         self.softmax = torch.nn.Softmax(dim=-1)
 
         self.relu = torch.nn.ReLU()
@@ -75,6 +75,37 @@ class HeatmapProcessor(torch.nn.Module):
         occlusions = torch.zeros(1)
         
         return points, occlusions
+        
+#    def soft_argmax(self, heatmap, argmax_indices):
+#        """
+#        Computes soft argmax.
+#
+#        Args:
+#            heatmap: Tensor with shape [Points*Frames, Height, Width]
+#            argmax_indices: Hard argmax indices. Tensor with shape [Frames, 2]
+#        
+#        Returns:
+#            Soft argmax indices. Tensor with shape [Frames, 2]
+#        """
+#
+#        F, H, W = heatmap.shape
+#
+#        # Create grid of shape FxHxWx2
+#        grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
+#        grid_y = grid_y.unsqueeze(0).expand(F, -1, -1).float()
+#        grid_x = grid_x.unsqueeze(0).expand(F, -1, -1).float()
+#        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
+#
+#        # Generate mask of a circle of radius radius around the argmax
+#        mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)), dim=-1) <= self.argmax_radius  # shape (B, H, W)
+#
+#        # Apply mask and get sums
+#        heatmap = heatmap * mask.float() + self.epsilon  # Ensure non-zero heatmap for numerical stability
+#        hm_sum = torch.sum(heatmap, dim=(1, 2))  # F
+#        points = torch.sum(grid * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1)  # shape (F, 2)
+#        
+#        return points
+
 
     def soft_argmax(self, heatmap, argmax_indices):
         """
@@ -114,7 +145,6 @@ class HeatmapProcessor(torch.nn.Module):
         points = torch.sum(grid.float() * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
         
         return points
-
 
 class FixedHeatmapProcessor(torch.nn.Module):
     """

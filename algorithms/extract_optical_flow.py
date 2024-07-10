@@ -66,7 +66,8 @@ def extract_optical_flow_pairs(video: torch.Tensor, query_points: torch.Tensor):
                     outside_of_bounds = True
                     break
             
-            if not outside_of_bounds and torch.equal(intermediate_point.long(), query_point[1:].long()):
+            #if not outside_of_bounds and torch.equal(intermediate_point.long(), query_point[1:].long()):
+            if not outside_of_bounds and torch.norm(intermediate_point - query_point[1:]) < 2:
                 endpoint = torch.cat([torch.tensor([sequence_length]), endpoint])
                 point_pair = (query_point, endpoint)
                 point_pairs.append(point_pair)

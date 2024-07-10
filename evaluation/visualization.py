@@ -7,6 +7,37 @@ import io
 import imageio
 from matplotlib import cm
 
+def visualize_heatmaps(heatmaps, pred_points, target_points):
+    """
+    Visualize all N heatmaps from a PyTorch tensor of shape (N, H, W).
+    
+    Args:
+        heatmaps (torch.Tensor): Tensor of shape (N, H, W) containing the heatmaps.
+    """
+    N, H, W = heatmaps.shape
+    # Determine the number of rows and columns for the subplots
+    cols = int(torch.ceil(torch.sqrt(torch.tensor(N)).float()))
+    rows = int(torch.ceil(torch.tensor(N).float() / cols))
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 15), dpi=100)
+    
+    for i in range(rows * cols):
+        ax = axes[i // cols, i % cols]
+        if i < N:
+            ax.imshow(heatmaps[i].detach().cpu().numpy(), cmap='viridis', interpolation='nearest')
+            ax.set_title(f'Heatmap {i+1}')
+            x, y = pred_points[i].detach().cpu().numpy()
+            ax.plot(x, y, 'bo')  # Plot the point in blue with a circle marker
+            x, y = target_points[i].detach().cpu().numpy()
+            ax.plot(x, y, 'ro')  # Plot the point in blue with a circle marker
+        ax.axis('off')
+    
+    plt.tight_layout()
+    #plt.show()
+
+    return plt
+
+
 def array_to_heatmap(data_slice):
     """
     Creates colorful heatmap from array with values between 0 and 1

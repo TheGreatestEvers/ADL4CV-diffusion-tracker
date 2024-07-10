@@ -20,7 +20,7 @@ class ResidualFeatureBlock(torch.nn.Module):
         for i in range(len(self.channels) - 1):
             layer = torch.nn.Sequential(
                 torch.nn.Conv2d(self.channels[i], self.channels[i+1], kernel_size=5, stride=1, padding='same'),
-                torch.nn.BatchNorm2d(self.channels[i+1]),
+                #torch.nn.BatchNorm2d(self.channels[i+1]),
                 torch.nn.ReLU()
             )
 
@@ -28,7 +28,8 @@ class ResidualFeatureBlock(torch.nn.Module):
 
         layer = torch.nn.Sequential(
             torch.nn.Conv2d(self.channels[-1], self.n_output_channels, kernel_size=5, stride=1, padding='same'),
-            torch.nn.BatchNorm2d(self.n_output_channels)
+            #torch.nn.BatchNorm2d(self.n_output_channels)
+            torch.nn.ReLU()
         )
         self.layers.append(layer)
 
