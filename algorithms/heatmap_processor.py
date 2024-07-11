@@ -1,4 +1,7 @@
 import torch
+import numpy as np
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class HeatmapProcessor(torch.nn.Module):
     """
@@ -57,54 +60,31 @@ class HeatmapProcessor(torch.nn.Module):
         # Add channel dim and reshape to N*F, C, H, W
         heatmaps = heatmaps.unsqueeze(2).view(N*F, 1, H, W)
 
-        heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
-        heatmaps = self.relu(heatmaps)
+        #heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
+        #heatmaps = self.relu(heatmaps)
 
         # Position inference
-        heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
-        heatmaps = torch.flatten(heatmaps, start_dim=2)
-        heatmaps = self.softmax(heatmaps)
+        #heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
+        heatmaps = torch.flatten(heatmaps.squeeze(), start_dim=1)
+        ##heatmaps = self.softmax(heatmaps)
 
-        argmax_flat = torch.argmax(heatmaps.squeeze(), dim=-1)
-        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+        #points = self.soft_argmax_heatmap(heatmaps.squeeze().view(N, F, H, W))
 
-        points = self.soft_argmax(heatmaps.view(N*F, 1, H, W).squeeze(), argmax_indices)
+        #argmax_flat = torch.argmax(torch.flatten(heatmaps, start_dim=2).squeeze(), dim=-1)
+        #argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+
+        # Compute softargmax
+        heatmap_range = torch.arange(256*256).to(device)
+        softmax_vals = self.softmax(heatmaps * 1e6)
+        argmax_flat = torch.sum(softmax_vals * heatmap_range, dim=-1)
+
+        points = argmax_flat
         points = points.view(N, F, -1)
 
-        # Occlusion inference
-        occlusions = torch.zeros(1)
+        # # Occlusion inference
+        # occlusions = torch.zeros(1)
         
-        return points, occlusions
-        
-#    def soft_argmax(self, heatmap, argmax_indices):
-#        """
-#        Computes soft argmax.
-#
-#        Args:
-#            heatmap: Tensor with shape [Points*Frames, Height, Width]
-#            argmax_indices: Hard argmax indices. Tensor with shape [Frames, 2]
-#        
-#        Returns:
-#            Soft argmax indices. Tensor with shape [Frames, 2]
-#        """
-#
-#        F, H, W = heatmap.shape
-#
-#        # Create grid of shape FxHxWx2
-#        grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
-#        grid_y = grid_y.unsqueeze(0).expand(F, -1, -1).float()
-#        grid_x = grid_x.unsqueeze(0).expand(F, -1, -1).float()
-#        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
-#
-#        # Generate mask of a circle of radius radius around the argmax
-#        mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)), dim=-1) <= self.argmax_radius  # shape (B, H, W)
-#
-#        # Apply mask and get sums
-#        heatmap = heatmap * mask.float() + self.epsilon  # Ensure non-zero heatmap for numerical stability
-#        hm_sum = torch.sum(heatmap, dim=(1, 2))  # F
-#        points = torch.sum(grid * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1)  # shape (F, 2)
-#        
-#        return points
+        return points
 
 
     def soft_argmax(self, heatmap, argmax_indices):
@@ -122,10 +102,10 @@ class HeatmapProcessor(torch.nn.Module):
         F, H, W = heatmap.shape
 
         # Create grid of shape FxHxWx2
-        grid_y, grid_x = torch.meshgrid(torch.arange(H), torch.arange(W))
+        grid_y, grid_x = torch.meshgrid((torch.arange(H, device=device), torch.arange(W, device=device)))
         grid_y = grid_y.unsqueeze(0).expand(F, -1, -1).float()
         grid_x = grid_x.unsqueeze(0).expand(F, -1, -1).float()
-        grid = torch.stack((grid_y, grid_x), dim=-1).to(heatmap.device)
+        grid = torch.stack((grid_y, grid_x), dim=-1)
 
         # Generate mask of a circle of radius radius around the argmax
         mask = torch.norm((grid - argmax_indices.unsqueeze(1).unsqueeze(2)), dim=-1) <= self.argmax_radius # shape (B, H, W)
@@ -145,6 +125,87 @@ class HeatmapProcessor(torch.nn.Module):
         points = torch.sum(grid.float() * heatmap.unsqueeze(-1), dim=(1, 2)) / hm_sum.unsqueeze(-1) # shape (F, 2)
         
         return points
+
+    def soft_argmax_heatmap(
+        self,
+        heatmaps: torch.Tensor,
+        threshold: float = 5.0,
+    ) -> torch.Tensor:
+        """Computes the soft argmax of a heatmap.
+
+        Finds the argmax grid cell, and then returns the average coordinate of
+        surrounding grid cells, weighted by the softmax.
+
+        Args:
+            softmax_val: A heatmap of shape [N, F, height, width], containing all positive
+            values summing to 1 across the entire grid.
+            threshold: The radius of surrounding cells to consider when computing the
+            average.
+
+        Returns:
+            The soft argmax, which is a single point [x,y] in grid coordinates.
+        """
+        num_points, frames, height, width = heatmaps.shape
+
+        points = torch.zeros(num_points, frames, 2, device=device)
+
+        y, x = torch.meshgrid(torch.arange(height).to(device), torch.arange(width).to(device))
+        
+        for n in range(num_points):
+            for f in range(frames):
+                hmp = heatmaps[n, f]
+                coords = torch.stack([x + 0.5, y + 0.5], dim=-1)
+                argmax_pos = torch.argmax(hmp.view(-1))
+                pos = coords.view(-1, 2)[argmax_pos].view(1, 1, 2)
+                valid = torch.sum((coords - pos) ** 2, dim=-1, keepdim=True) < threshold ** 2
+                weighted_sum = torch.sum(coords * valid * hmp.unsqueeze(-1), dim=(0, 1))
+                sum_of_weights = torch.maximum(torch.sum(valid * hmp.unsqueeze(-1), dim=(0, 1)), torch.tensor(1e-12))
+                points[n, f] = weighted_sum / sum_of_weights
+        
+        return points
+
+    def heatmaps_to_points(
+        self,
+        all_pairs_softmax: torch.Tensor,
+        image_shape: torch.Size = torch.tensor([256, 256]),
+        threshold: float = 5.0
+    ) -> torch.Tensor:
+        """Given a batch of heatmaps, compute a soft argmax.
+
+        If query points are given, constrain that the query points are returned
+        verbatim.
+
+        Args:
+            all_pairs_softmax: A set of heatmaps, of shape [num_points, time,
+            height, width].
+            image_shape: The shape of the original image that the feature grid was
+            extracted from.  This is needed to properly normalize coordinates.
+            threshold: Threshold for the soft argmax operation.
+            query_points (optional): If specified, we assume these points are given as
+            ground truth and we reproduce them exactly.  This is a set of points of
+            shape [batch, num_points, 3], where each entry is [t, y, x] in frame/
+            raster coordinates.
+
+        Returns:
+            Predicted points, of shape [batch, num_points, time, 2], where each point is
+            [x, y] in raster coordinates.  These are the result of a soft argmax except
+            where the query point is specified, in which case the query points are
+            returned verbatim.
+        """
+        # soft_argmax_heatmap operates over a single heatmap. We map it across
+        # batch, num_points, and frames.
+        vmap_sah = torch.vmap(self.soft_argmax_heatmap, in_dims=(0, None))
+        for _ in range(2):
+            vmap_sah = torch.vmap(vmap_sah, in_dims=(0, None))
+
+        out_points = vmap_sah(all_pairs_softmax, threshold)
+        feature_grid_shape = all_pairs_softmax.shape[2:]
+
+        # Note: out_points is now [x, y]; we need to divide by [width, height].
+        out_points = out_points / torch.tensor([feature_grid_shape[2], feature_grid_shape[1]])
+
+        return out_points
+    
 
 class FixedHeatmapProcessor(torch.nn.Module):
     """
@@ -223,3 +284,12 @@ class FixedHeatmapProcessor(torch.nn.Module):
         
         return points
 
+
+
+if __name__ == "__main__":
+    processor = HeatmapProcessor()
+
+    test_hmp = torch.zeros(256, 256)
+    test_hmp[120, 130] = 1
+    point = processor.soft_argmax_heatmap(test_hmp)
+    print(point)

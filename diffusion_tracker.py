@@ -58,27 +58,24 @@ class SelfsupervisedDiffusionTracker():
         dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
         self.data = dataset[0]
         feature = torch.load("swan_feature_tensor.pt").to(device) # fix
-
         # F,C,H,W = feature.shape
         # feature = feature.permute((0, 2, 3, 1)).contiguous().view(F*H,W,C)
         # feature = func.interpolate(feature, size=64)
         # feature = feature.view(F,H,W,64).permute(0,3,1,2)
-
-        # min_val = torch.min(feature)
-        # max_val = torch.max(feature)
-
-        # # Normalize the tensor to the range [0, 1]
-        # feature = (feature - min_val) / (max_val - min_val)
-
         self.data["features"] = feature
+
+
+
+        
 
         self.track_model = TrackingModel().to(device)
         self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=N_CHANNELS).to(device)
+        #self.dict_processor = FeatureDictProcessor(self.data["features"]).to(device)
 
         params = list(self.track_model.parameters()) + list(self.residual_block.parameters())
-        self.optimizer = torch.optim.AdamW(params, lr=self.config['learning_rate'])        
+        self.optimizer = torch.optim.AdamW(params, lr=0.01)        
         #self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.95)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 10, 0.8)
+        #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 10, 0.8)
 
         self.mse = torch.nn.MSELoss()
         self.huber = torch.nn.HuberLoss()
@@ -131,6 +128,7 @@ class SelfsupervisedDiffusionTracker():
         loss_of = self.huber(pred_endpoints, of_point_pairs[1][:, 1:])
 
         return loss_of
+            
 
     def loss_long(self, og_query_points, pred_endpoints, reverse_feat_dict):
         """
@@ -183,7 +181,13 @@ class SelfsupervisedDiffusionTracker():
         with torch.no_grad():
             refined_features = features + self.residual_block(video_tensor)
             heatmaps = self.track_model.heatmap_generator.generate(refined_features, query_points)
-            pred_points, _ = self.track_model.heatmap_processor.predictions_from_heatmap(heatmaps)
+
+            N,F,H,W = heatmaps.shape
+            tracks = self.track_model.trackerhead(heatmaps.view(N*F, 1, H, W))
+            pred_points = tracks.view(N, F, 2)
+
+        print(pred_points)
+        print(target_points)
 
         wandb.log({"chart1": visualize_heatmaps(heatmaps[0].cpu(), pred_points[0], target_points[0])})
         wandb.log({"chart2": visualize_heatmaps(heatmaps[1].cpu(), pred_points[1], target_points[1])})
@@ -239,7 +243,7 @@ class SelfsupervisedDiffusionTracker():
         target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
         occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)[0]
         query_points = torch.tensor(self.data["query_points"], dtype=torch.float32, device=device)[0]
-        #query_points = query_points[query_points[:, 0] == 0]
+        query_points = query_points[query_points[:, 0] == 0]
         #query_points = query_points[0].unsqueeze(0)
         
         video = self.data["video"][0] / 255.0
@@ -259,11 +263,6 @@ class SelfsupervisedDiffusionTracker():
 
         of_point_pairs = extract_optical_flow_pairs(video_tensor, query_points)
 
-        # for pair in of_point_pairs:
-        #     print("----------------------- Pair: ----------------------")
-        #     print(pair[0])
-        #     print(pair[1])
-
         of_query_points = []
         of_endpoints = []
         for point_pair in of_point_pairs:
@@ -281,7 +280,7 @@ class SelfsupervisedDiffusionTracker():
             ## Train
             #self.track_model.train()
             
-            running_loss = 0
+            #running_loss = 0
 
             for of_point_pair_batch in self.get_of_point_pair_batch(of_point_pairs, batch_size=32):
                 self.optimizer.zero_grad()
@@ -292,7 +291,7 @@ class SelfsupervisedDiffusionTracker():
                 wandb.log({"residual_features": residual_features.norm(), "features": features.norm()})
 
                 loss = 0.01 * self.loss_of(of_point_pair_batch, refined_features)
-                loss += self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                #loss += self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
                 #pred_points = self.track_model.forward_skip(refined_features, query_points)
                 #running_loss = self.huber(pred_points, target_points)
 
@@ -315,17 +314,55 @@ class SelfsupervisedDiffusionTracker():
                 eval_error = self.evaluate(query_points, target_points, occluded, features, video_tensor)
                 wandb.log({"evaluation": eval_error})
 
+        wandb.finish()   
+
+    def gt_heatmaps(self, target_points):
+        N, F, _ = target_points.shape
+        heatmaps = torch.zeros(N,F,256,256, device=device)
+        for i in range(N):
+            for j in range(F):
+                y = target_points[i, j, 0].long()
+                x = target_points[i, j, 1].long()
+                heatmaps[i, j, y, x] = 1 
+        return heatmaps
+    
+    def overfit_supervised(self):
+        optimizer_track = torch.optim.Adam(self.track_model.parameters(), lr=3e-4) 
+
+        target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
+        occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)[0]
+        query_points = torch.tensor(self.data["query_points"], dtype=torch.float32, device=device)[0]
+
+        query_points = query_points[0].unsqueeze(0)
+        target_points = target_points[0].unsqueeze(0)
+
+        features = self.data["features"].to(device)
+
+        assert sum(occluded[0]) == 0
+
+        for step in range(500):
+            optimizer_track.zero_grad()
+            pred_points = self.track_model.forward_skip(features, query_points)
+
+            target_points_flat = target_points[:,:,1]*256 + target_points[:,:,0] 
+            target_points_flat.unsqueeze(0)
+            loss = self.mse(target_points_flat, pred_points)
+            #loss.backward()
+            #norm_track = torch.nn.utils.clip_grad_norm_(self.track_model.parameters(), 1000)
+            #optimizer_track.step()
+
+            print(f"{step}: loss: {loss:.4f}")# | norm-track: {norm_track:.4f}")
 
 
 
-        wandb.finish()    
 
 
 if __name__ == "__main__":
 
     dt = SelfsupervisedDiffusionTracker()
-    dt.train()
-    torch.save(dt.model.state_dict(), 'unsupervised.pth')
+    #dt.train()
+    dt.overfit_supervised()
+    #torch.save(dt.model.state_dict(), 'unsupervised.pth')
 
 
 

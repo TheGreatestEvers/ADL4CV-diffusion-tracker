@@ -1,7 +1,10 @@
 import torch
 import torch.nn.functional as F
 from algorithms.heatmap_generator import HeatmapGenerator
-from algorithms.heatmap_processor import HeatmapProcessor
+from algorithms.heatmap_processor import HeatmapProcessor, FixedHeatmapProcessor
+from algorithms.dino_trackerhead import TrackerHead
+
+device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
 class FeatureDictProcessor(torch.nn.Module):
     """
@@ -13,9 +16,14 @@ class FeatureDictProcessor(torch.nn.Module):
 
         self.relu = torch.nn.ReLU()
 
-        n_channels = 32
+        n_channels = 64
 
         # 1D Conv layers
+        self.conv1d_enc128 = torch.nn.Conv2d(feature_dict["encoder_block"][0].shape[1], n_channels, 1)
+        self.conv1d_enc64 = torch.nn.Conv2d(feature_dict["encoder_block"][1].shape[1], n_channels, 1)
+        self.conv1d_enc32_1 = torch.nn.Conv2d(feature_dict["encoder_block"][2].shape[1], n_channels, 1)
+        self.conv1d_enc32_2 = torch.nn.Conv2d(feature_dict["encoder_block"][3].shape[1], n_channels, 1)
+
         self.conv1d_up8 = torch.nn.Conv2d(feature_dict["up_block"][0].shape[1], n_channels, 1)
         self.conv1d_up16 = torch.nn.Conv2d(feature_dict["up_block"][1].shape[1], n_channels, 1)
         self.conv1d_up32_1 = torch.nn.Conv2d(feature_dict["up_block"][2].shape[1], n_channels, 1)
@@ -43,8 +51,8 @@ class FeatureDictProcessor(torch.nn.Module):
         # self.upsample_128_to_256 = torch.nn.ConvTranspose2d(n_channels, n_channels, 2, stride=2)
 
         # Refining Conv layers
-        self.refine_conv1 = torch.nn.Conv3d(n_channels, 64, 3, padding=1) # Make this maintain spatial size
-        self.refine_conv2 = torch.nn.Conv3d(64, 64, 3, padding=1) # Make this maintain spatial size
+        self.refine_conv1 = torch.nn.Conv3d(n_channels, 128, 3, padding=1) # Make this maintain spatial size
+        self.refine_conv2 = torch.nn.Conv3d(128, 128, 3, padding=1) # Make this maintain spatial size
 
 
     def forward(self, feature_dict):
@@ -52,55 +60,59 @@ class FeatureDictProcessor(torch.nn.Module):
         ### Process features
 
         # Spatial: 4
-        features = self.conv1d_mid4(feature_dict["mid_block"][0].float()) \
-            + self.conv1d_down4_2(feature_dict["down_block"][3].float()) \
-            + self.conv1d_down4_1(feature_dict["down_block"][2].float())
+        features = self.conv1d_mid4(feature_dict["mid_block"][0].float().to(device)) \
+            + self.conv1d_down4_2(feature_dict["down_block"][3].float().to(device)) \
+            + self.conv1d_down4_1(feature_dict["down_block"][2].float().to(device))
 
         # Spatial 8        
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         #features = self.upsample_4_to_8(features)
 
         features = features \
-            + self.conv1d_up8(feature_dict["up_block"][0].float()) \
-            + self.conv1d_down8(feature_dict["down_block"][1].float()) 
+            + self.conv1d_up8(feature_dict["up_block"][0].float().to(device)) \
+            + self.conv1d_down8(feature_dict["down_block"][1].float().to(device)) 
         
         # Spatial 16
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_8_to_16(features)
 
         features = features \
-            + self.conv1d_up16(feature_dict["up_block"][1].float()) \
-            + self.conv1d_down16(feature_dict["down_block"][0].float())
+            + self.conv1d_up16(feature_dict["up_block"][1].float().to(device)) \
+            + self.conv1d_down16(feature_dict["down_block"][0].float().to(device))
         
         # Spatial 32
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_16_to_32(features)
 
         features = features \
-            + self.conv1d_up32_1(feature_dict["up_block"][2].float()) \
-            + self.conv1d_up32_2(feature_dict["up_block"][3].float())
+            + self.conv1d_up32_1(feature_dict["up_block"][2].float().to(device)) \
+            + self.conv1d_up32_2(feature_dict["up_block"][3].float().to(device)) \
+            + self.conv1d_enc32_2(feature_dict["encoder_block"][3].float().to(device)) \
+            + self.conv1d_enc32_1(feature_dict["encoder_block"][2].float().to(device))
         
         # Spatial 64
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_32_to_64(features)
 
         features = features \
-            + self.conv1d_dec64(feature_dict["decoder_block"][0].float())
+            + self.conv1d_dec64(feature_dict["decoder_block"][0].float().to(device)) \
+            + self.conv1d_enc64(feature_dict["encoder_block"][1].float().to(device))
         
         # Spatial 128
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_64_to_128(features)
 
         features = features \
-            + self.conv1d_dec128(feature_dict["decoder_block"][1].float())
+            + self.conv1d_dec128(feature_dict["decoder_block"][1].float().to(device)) \
+            + self.conv1d_enc128(feature_dict["encoder_block"][0].float().to(device))
         
         # Spatial 256
         features = F.interpolate(features, scale_factor=2, mode="bilinear", align_corners=False)
         # features = self.upsample_128_to_256(features)
 
         features = features \
-            + self.conv1d_dec256_1(feature_dict["decoder_block"][2].float()) \
-            + self.conv1d_dec256_2(feature_dict["decoder_block"][3].float())
+            + self.conv1d_dec256_1(feature_dict["decoder_block"][2].float().to(device)) \
+            + self.conv1d_dec256_2(feature_dict["decoder_block"][3].float().to(device))
         
         # Refine
         features = torch.permute(features, (1, 0, 2, 3)) # C, F, H, W
@@ -122,6 +134,8 @@ class TrackingModel(torch.nn.Module):
 
         self.heatmap_generator = HeatmapGenerator()
         self.heatmap_processor = HeatmapProcessor()
+        self.trackerhead = TrackerHead()
+        self.fixed_heatmap_processor = FixedHeatmapProcessor()
 
     def forward_stepwise(self, features, query_points):
         """
@@ -146,9 +160,8 @@ class TrackingModel(torch.nn.Module):
             feat_consecutive_frames = torch.stack((feat_t0, feat_t1))
 
             heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, new_query_points)
-            heatmaps = self.heatmap_generator.generate(feat_consecutive_frames, new_query_points)
 
-            points, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+            points = self.heatmap_processor.predictions_from_heatmap(heatmaps)
 
             tracks[:, i+1] = points[:, 1]
 
@@ -160,9 +173,9 @@ class TrackingModel(torch.nn.Module):
     def forward_skip(self, features, query_points):
 
         heatmaps = self.heatmap_generator.generate(features, query_points)
-        tracks, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+        tracks = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+        #tracks, _ = self.fixed_heatmap_processor.predictions_from_heatmap(heatmaps)
 
         return tracks
-
 
 

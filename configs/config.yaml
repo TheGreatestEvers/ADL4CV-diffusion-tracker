@@ -1,7 +1,7 @@
-dataset_dir: features/swan/
-learning_rate: !!float 0.005
+dataset_dir: output/features/davis/
+learning_rate: !!float 0.0005
 total_iterations: 1500
-eval_freq: 3
+eval_freq: 8
 
 wandb:
   project: 'diffusion-tracker'
