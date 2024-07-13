@@ -16,6 +16,8 @@ from algorithms.extract_optical_flow import extract_optical_flow_pairs, preproce
 from info_nce import InfoNCE
 from evaluation.visualization import visualize_heatmaps
 from math import ceil
+from algorithms.heatmap_generator import HeatmapGenerator
+from algorithms.heatmap_processor import HeatmapProcessor 
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
@@ -69,7 +71,7 @@ class SelfsupervisedDiffusionTracker():
         
 
         self.track_model = TrackingModel().to(device)
-        self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=N_CHANNELS).to(device)
+        self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=128).to(device)
         #self.dict_processor = FeatureDictProcessor(self.data["features"]).to(device)
 
         params = list(self.track_model.parameters()) + list(self.residual_block.parameters())
@@ -323,35 +325,60 @@ class SelfsupervisedDiffusionTracker():
             for j in range(F):
                 y = target_points[i, j, 0].long()
                 x = target_points[i, j, 1].long()
-                heatmaps[i, j, y, x] = 1 
+                heatmaps[i, j, y, x] = 1000.0
         return heatmaps
     
     def overfit_supervised(self):
-        optimizer_track = torch.optim.Adam(self.track_model.parameters(), lr=3e-4) 
+        wandb.init(entity=self.config['wandb']['entity'],
+          project=self.config['wandb']['project'],
+          #mode="disabled",
+          config=self.config)
 
         target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
         occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)[0]
         query_points = torch.tensor(self.data["query_points"], dtype=torch.float32, device=device)[0]
 
-        query_points = query_points[0].unsqueeze(0)
-        target_points = target_points[0].unsqueeze(0)
+        #query_points = query_points[0]
+        #target_points = target_points[0]
+        mask = query_points[:, 0] == 0
+        query_points = query_points[mask]
+        target_points = target_points[mask]
 
         features = self.data["features"].to(device)
 
-        assert sum(occluded[0]) == 0
+        video = self.data["video"][0] / 255.0
+        video_tensor = torch.tensor(video, device=device, dtype=torch.float32).permute(0, 3, 1, 2)
 
-        for step in range(500):
+        heatmap_generator = HeatmapGenerator()
+        heatmap_processor = HeatmapProcessor().to(device)
+        residual_net = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=128).to(device)
+
+        optimizer_track = torch.optim.Adam(heatmap_processor.parameters(), lr=0.01) 
+        optimizer_residual = torch.optim.Adam(residual_net.parameters(), lr=0.01) 
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer_track, 30, 0.99)
+
+        for step in range(10000):
             optimizer_track.zero_grad()
-            pred_points = self.track_model.forward_skip(features, query_points)
+            optimizer_residual.zero_grad()
 
-            target_points_flat = target_points[:,:,1]*256 + target_points[:,:,0] 
-            target_points_flat.unsqueeze(0)
-            loss = self.mse(target_points_flat, pred_points)
-            #loss.backward()
-            #norm_track = torch.nn.utils.clip_grad_norm_(self.track_model.parameters(), 1000)
-            #optimizer_track.step()
+            refined_features = features + residual_net(video_tensor)
+            heatmaps = heatmap_generator.generate(refined_features, query_points)
+            pred_points = heatmap_processor.predictions_from_heatmap(heatmaps)
 
-            print(f"{step}: loss: {loss:.4f}")# | norm-track: {norm_track:.4f}")
+            loss = self.mse(pred_points / 128 - 1, target_points / 128 - 1)
+            loss.backward()
+            norm_residual = torch.nn.utils.clip_grad_norm_(residual_net.parameters(), 10000)
+            norm_track = torch.nn.utils.clip_grad_norm_(heatmap_processor.parameters(), 10000)
+            
+            print(f"{step}: loss: {loss:.4f} | norm-track: {norm_track:.4f} | norm-residual: {norm_residual:.4f}")
+            wandb.log({"loss-mse": loss})
+
+            optimizer_residual.step()
+            optimizer_track.step()
+            scheduler.step()
+
+        wandb.finish()
+
 
 
 

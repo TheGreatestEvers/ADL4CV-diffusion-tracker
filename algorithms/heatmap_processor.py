@@ -60,31 +60,23 @@ class HeatmapProcessor(torch.nn.Module):
         # Add channel dim and reshape to N*F, C, H, W
         heatmaps = heatmaps.unsqueeze(2).view(N*F, 1, H, W)
 
-        #heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
-        #heatmaps = self.relu(heatmaps)
+        heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
+        heatmaps = self.relu(heatmaps)
 
         # Position inference
-        #heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
-        heatmaps = torch.flatten(heatmaps.squeeze(), start_dim=1)
-        ##heatmaps = self.softmax(heatmaps)
+        heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
 
-        #points = self.soft_argmax_heatmap(heatmaps.squeeze().view(N, F, H, W))
+        heatmaps = heatmaps.squeeze()
+        heatmaps = heatmaps.view(-1, H*W)
+        heatmaps = self.softmax(heatmaps)
 
-        #argmax_flat = torch.argmax(torch.flatten(heatmaps, start_dim=2).squeeze(), dim=-1)
-        #argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+        argmax_flat = torch.argmax(heatmaps, dim=-1)
+        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
 
-        # Compute softargmax
-        heatmap_range = torch.arange(256*256).to(device)
-        softmax_vals = self.softmax(heatmaps * 1e6)
-        argmax_flat = torch.sum(softmax_vals * heatmap_range, dim=-1)
-
-        points = argmax_flat
-        points = points.view(N, F, -1)
-
-        # # Occlusion inference
-        # occlusions = torch.zeros(1)
+        points = self.soft_argmax(heatmaps.view(-1, H, W), argmax_indices)
         
-        return points
+        return points.view(N, F, -1)
+
 
 
     def soft_argmax(self, heatmap, argmax_indices):
@@ -289,7 +281,8 @@ class FixedHeatmapProcessor(torch.nn.Module):
 if __name__ == "__main__":
     processor = HeatmapProcessor()
 
-    test_hmp = torch.zeros(256, 256)
-    test_hmp[120, 130] = 1
-    point = processor.soft_argmax_heatmap(test_hmp)
+    test_hmp = torch.zeros(1, 1, 256, 256)
+    test_hmp[0, 0, 120, 130] = 1
+    point = processor.predictions_from_heatmap(test_hmp.to(device))
     print(point)
+    print(point.shape)
