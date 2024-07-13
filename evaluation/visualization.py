@@ -7,7 +7,7 @@ import io
 import imageio
 from matplotlib import cm
 
-def visualize_heatmaps(heatmaps, pred_points, target_points):
+def visualize_heatmaps(video, heatmaps, pred_points, target_points):
     """
     Visualize all N heatmaps from a PyTorch tensor of shape (N, H, W).
     
@@ -19,17 +19,18 @@ def visualize_heatmaps(heatmaps, pred_points, target_points):
     cols = int(torch.ceil(torch.sqrt(torch.tensor(N)).float()))
     rows = int(torch.ceil(torch.tensor(N).float() / cols))
     
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 15), dpi=100)
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 15), dpi=50)
     
     for i in range(rows * cols):
         ax = axes[i // cols, i % cols]
         if i < N:
-            ax.imshow(heatmaps[i].detach().cpu().numpy(), cmap='viridis', interpolation='nearest')
+            #ax.imshow(video[i].permute(1, 2, 0).detach().cpu().numpy())
+            ax.imshow(heatmaps[i].detach().cpu().numpy(), cmap='viridis')
             ax.set_title(f'Heatmap {i+1}')
             x, y = pred_points[i].detach().cpu().numpy()
-            ax.plot(x, y, 'bo')  # Plot the point in blue with a circle marker
+            ax.plot(y, x, 'bo')  # Plot the point in blue with a circle marker
             x, y = target_points[i].detach().cpu().numpy()
-            ax.plot(x, y, 'ro')  # Plot the point in blue with a circle marker
+            ax.plot(y, x, 'ro')  # Plot the point in blue with a circle marker
         ax.axis('off')
     
     plt.tight_layout()

@@ -135,7 +135,7 @@ def extract_diffusion_features(
 
     datasets = {}
     
-    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=False)
+    diffusion_wrapper = DiffusionWrapper(diffusion_model_path, enable_vae_slicing=enable_vae_slicing)
     
     if 'davis' in input_dataset_paths.keys():
         datasets['davis'] = create_davis_dataset(input_dataset_paths['davis'])
@@ -149,7 +149,7 @@ def extract_diffusion_features(
             data_with_features_dict = data[dataset_name]
 
             prompt = ""
-            with open(os.path.join('davis_slim_prompts/', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
+            with open(os.path.join('tapvid_davis_prompts', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
                 prompt = prompt_file.read()
 
                 prompt_file.close()
