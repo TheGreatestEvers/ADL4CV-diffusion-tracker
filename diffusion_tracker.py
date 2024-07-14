@@ -12,13 +12,12 @@ from learning_based.model import FeatureDictProcessor, TrackingModel
 from learning_based.residual_block import ResidualFeatureBlock
 import time
 import torch.nn.functional as func
-from algorithms.extract_optical_flow import extract_optical_flow_pairs, preprocess_video
+from algorithms.extract_optical_flow import extract_optical_flow_pairs, preprocess_video, plot_images_with_points
 from info_nce import InfoNCE
 from evaluation.visualization import visualize_heatmaps
 from math import ceil
 from random import randint
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
@@ -27,6 +26,8 @@ N_POINTS = 24
 N_CHANNELS = 64
 ACCUM_ITER = 2
 BATCH_SIZE = 32
+VIDEO_IDX = 0
+FEATURE_TYPE = "better_feature" #features or better_feature
 
 def plot_grad_flow(named_parameters):
     '''Plots the gradients flowing through different layers in the net during training.
@@ -88,21 +89,9 @@ class SelfsupervisedDiffusionTracker():
         self.config = read_config_file("configs/config.yaml")
 
         dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
-        self.data = dataset[0]
-        feature = torch.load("goat_feature_tensor.pt").to(device) # fix
+        self.data = dataset[VIDEO_IDX]
 
-        # F,C,H,W = feature.shape
-        # feature = feature.permute((0, 2, 3, 1)).contiguous().view(F*H,W,C)
-        # feature = func.interpolate(feature, size=64)
-        # feature = feature.view(F,H,W,64).permute(0,3,1,2)
-
-        # min_val = torch.min(feature)
-        # max_val = torch.max(feature)
-
-        # # Normalize the tensor to the range [0, 1]
-        # feature = (feature - min_val) / (max_val - min_val)
-
-        self.data["features"] = feature
+        self.of_point_pair_path = os.path.join('a_video_dir', 'video_' + str(VIDEO_IDX), 'of_trajectories.pt')
 
         self.track_model = TrackingModel().to(device)
         self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=N_CHANNELS).to(device)
@@ -135,7 +124,7 @@ class SelfsupervisedDiffusionTracker():
 
         #negative_features = torch.cat([negative_features_1, negative_features_2], dim=1)
 
-        loss = (self.loss_fn_infonce(query_features, target_features, negative_features_1) + self.loss_fn_infonce(target_features, query_features, negative_features_2)) / N
+        loss = self.loss_fn_infonce(query_features, target_features, negative_features_1) + self.loss_fn_infonce(target_features, query_features, negative_features_2)
 
         return loss
         
@@ -152,7 +141,7 @@ class SelfsupervisedDiffusionTracker():
         pred_endpoints_2 = torch.gather(pred_points_2, dim=1, index=of_point_pairs[0][:, 0].unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2).long()).squeeze()
         #print(pred_endpoints)
         #print(of_point_pairs[1][:, 1:])
-        loss_of = (self.huber(pred_endpoints_1, of_point_pairs[1][:, 1:]) + self.huber(pred_endpoints_2, of_point_pairs[0][:, 1:])) / N
+        loss_of = self.huber(pred_endpoints_1, of_point_pairs[1][:, 1:]) + self.huber(pred_endpoints_2, of_point_pairs[0][:, 1:])
 
         return loss_of
 
@@ -256,20 +245,17 @@ class SelfsupervisedDiffusionTracker():
 
         wandb.init(entity=self.config['wandb']['entity'],
           project=self.config['wandb']['project'],
-          #mode="disabled",
+          mode="disabled",
           config=self.config)
         
         
-        features = self.data["features"].to(device)
+        features = self.data[FEATURE_TYPE].to(device)
         target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
         occluded = torch.tensor(self.data["occluded"], dtype=torch.float32, device=device)[0]
         query_points = torch.tensor(self.data["query_points"], dtype=torch.float32, device=device)[0]
-        #query_points = query_points[query_points[:, 0] == 0]
-        #query_points = query_points[0].unsqueeze(0)
         
         video = self.data["video"][0] / 255.0
         video_tensor = torch.tensor(video, device=device, dtype=torch.float32).permute(0, 3, 1, 2)
-        # video_tensor = preprocess_video(video_tensor)
 
         features = features[:N_FRAMES, :N_CHANNELS]
         video_tensor = video_tensor[:N_FRAMES]
@@ -280,27 +266,18 @@ class SelfsupervisedDiffusionTracker():
         target_points = target_points[:query_points.shape[0]]
         occluded = occluded[:query_points.shape[0]]
 
-        print(target_points.shape)
+        of_point_pairs = torch.load(self.of_point_pair_path)
+        of_point_pairs = of_point_pairs[of_point_pairs[:, 3] < N_FRAMES]
 
-        #sampled_of_query_points = torch.rand([query_points.shape[0], 3]) * 255
-        #sampled_of_query_points[:,0] = (torch.rand([query_points.shape[0]]) * N_FRAMES).long()
-        #of_query_points = torch.cat([query_points.cpu(), sampled_of_query_points], dim=0)
-
-        of_point_pairs = extract_optical_flow_pairs(video_tensor, query_points)
-
-        # for pair in of_point_pairs:
-        #     print("----------------------- Pair: ----------------------")
-        #     print(pair[0])
-        #     print(pair[1])
-
-        of_query_points = []
-        of_endpoints = []
-        for point_pair in of_point_pairs:
-            of_query_points.append(point_pair[0])
-            of_endpoints.append(point_pair[1])
-        of_query_points = torch.stack(of_query_points).to(device=device)
-        of_endpoints = torch.stack(of_endpoints).to(device=device)
-        of_point_pairs = (of_query_points, of_endpoints)
+#For visually inspecting OF point pairs
+#        video_tensor = video_tensor.cpu()
+#        while True:
+#            idx = randint(0, of_point_pairs.shape[0])
+#            images = torch.cat((video_tensor[of_point_pairs[idx][0].long()].unsqueeze(0), video_tensor[of_point_pairs[idx][3].long()].unsqueeze(0)), dim=0)
+#
+#            point_pair = [(of_point_pairs[idx][1], of_point_pairs[idx][2]), (of_point_pairs[idx][4], of_point_pairs[idx][5])]
+#
+#            plot_images_with_points(images, point_pair)
 
         print(of_point_pairs[0].shape)
 
@@ -373,9 +350,6 @@ class SelfsupervisedDiffusionTracker():
             if iter % self.config['eval_freq'] == 0:
                 eval_error = self.evaluate(query_points, target_points, occluded, features, video_tensor)
                 wandb.log({"evaluation": eval_error})
-
-
-
 
         wandb.finish()    
 

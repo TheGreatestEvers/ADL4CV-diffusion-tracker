@@ -1,4 +1,3 @@
-import os
 import pickle
 import torch
 from copy import deepcopy
@@ -100,7 +99,7 @@ def plot_images_with_points(images, points):
         x, y = points[i]
         
         # Draw the point on the image
-        ax.plot(x, y, 'ro')  # 'ro' means red color, circle marker
+        ax.plot(y, x, 'ro')  # 'ro' means red color, circle marker
         
         # Optionally, set titles for each subplot
         ax.set_title(f'Image {i + 1}')

@@ -185,3 +185,5 @@ wandb
 output
 
 goat_feature_tensor.pt
+
+.vscode

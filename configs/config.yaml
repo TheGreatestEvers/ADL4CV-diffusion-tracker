@@ -1,4 +1,4 @@
-dataset_dir: output/features/davis/
+dataset_dir: features/davis/
 learning_rate: !!float 0.005
 total_iterations: 1500
 eval_freq: 3

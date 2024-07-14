@@ -9,3 +9,4 @@ tensorflow_datasets
 imageio
 wandb
 info-nce-pytorch
+einops
