@@ -99,7 +99,7 @@ class SelfsupervisedDiffusionTracker():
         params = list(self.track_model.parameters()) + list(self.residual_block.parameters())
         self.optimizer = torch.optim.AdamW(params, lr=self.config['learning_rate'])        
         #self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, 0.95)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 10, 0.8)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 40, 0.999)
 
         self.mse = torch.nn.MSELoss()
         self.huber = torch.nn.HuberLoss()
@@ -196,7 +196,7 @@ class SelfsupervisedDiffusionTracker():
         with torch.no_grad():
             refined_features = features + self.residual_block(video_tensor)
             heatmaps = self.track_model.heatmap_generator.generate(refined_features, query_points)
-            pred_points, _ = self.track_model.heatmap_processor.predictions_from_heatmap(heatmaps)
+            pred_points = self.track_model.heatmap_processor.predictions_from_heatmap(heatmaps)
 
         wandb.log({"chart1": visualize_heatmaps(video_tensor, heatmaps[4].cpu(), pred_points[4], target_points[4])})
         wandb.log({"chart2": visualize_heatmaps(video_tensor, heatmaps[5].cpu(), pred_points[5], target_points[5])})

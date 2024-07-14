@@ -160,7 +160,7 @@ class TrackingModel(torch.nn.Module):
     def forward_skip(self, features, query_points):
 
         heatmaps = self.heatmap_generator.generate(features, query_points)
-        tracks, _ = self.heatmap_processor.predictions_from_heatmap(heatmaps)
+        tracks = self.heatmap_processor.predictions_from_heatmap(heatmaps)
 
         return tracks
 
