@@ -245,7 +245,7 @@ class SelfsupervisedDiffusionTracker():
 
         wandb.init(entity=self.config['wandb']['entity'],
           project=self.config['wandb']['project'],
-          mode="disabled",
+          #mode="disabled",
           config=self.config)
         
         
@@ -268,6 +268,8 @@ class SelfsupervisedDiffusionTracker():
 
         of_point_pairs = torch.load(self.of_point_pair_path).to(device)
         of_point_pairs = of_point_pairs[of_point_pairs[:, 3] < N_FRAMES]
+
+        print(of_point_pairs.shape)
 
         permutation = np.random.permutation(of_point_pairs.shape[0])
         of_point_pairs = of_point_pairs[permutation]
