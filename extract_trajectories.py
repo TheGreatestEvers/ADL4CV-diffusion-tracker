@@ -273,7 +273,7 @@ def save_trajectories(args):
     with open(feature_path, 'rb') as dataset_file:
             dataset = pickle.load(dataset_file)
 
-    query_points = torch.tensor(dataset['query_points'][0])
+    query_points = torch.tensor(dataset[0]['query_points'][0])
 
     for trajectory in all_filtered_trajectories:
         # Create a mask for non-NaN values
@@ -288,7 +288,9 @@ def save_trajectories(args):
         
         query_point = torch.tensor((start_idx, trajectory[start_idx, 1], trajectory[start_idx, 0]))
 
-        if not torch.any((query_point[1:] - query_points[:, 1:]).norm(dim=-1) < 3):
+        check_query_points = query_points[(start_idx - query_points[:, 0]) <= 3]
+
+        if not torch.any((query_point[1:] - check_query_points[:, 1:]).norm(dim=-1) <= 1):
             continue
         
         # Mask the valid trajectory points starting from start_idx + 1

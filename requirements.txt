@@ -10,3 +10,4 @@ imageio
 wandb
 info-nce-pytorch
 einops
+opencv-python

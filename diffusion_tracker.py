@@ -21,11 +21,11 @@ import matplotlib.pyplot as plt
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
-N_FRAMES = 32
-N_POINTS = 24
+N_FRAMES = 8
+N_POINTS = 512
 N_CHANNELS = 64
-ACCUM_ITER = 2
-BATCH_SIZE = 32
+ACCUM_ITER = 4
+BATCH_SIZE = 64
 VIDEO_IDX = 0
 FEATURE_TYPE = "better_feature" #features or better_feature
 
@@ -89,7 +89,7 @@ class SelfsupervisedDiffusionTracker():
         self.config = read_config_file("configs/config.yaml")
 
         dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
-        self.data = dataset[VIDEO_IDX]
+        self.data = dataset[VIDEO_IDX][0]
 
         self.of_point_pair_path = os.path.join('a_video_dir', 'video_' + str(VIDEO_IDX), 'of_trajectories.pt')
 
@@ -124,7 +124,7 @@ class SelfsupervisedDiffusionTracker():
 
         #negative_features = torch.cat([negative_features_1, negative_features_2], dim=1)
 
-        loss = self.loss_fn_infonce(query_features, target_features, negative_features_1) + self.loss_fn_infonce(target_features, query_features, negative_features_2)
+        loss = (self.loss_fn_infonce(query_features, target_features, negative_features_1) + self.loss_fn_infonce(target_features, query_features, negative_features_2)) * 0.5
 
         return loss
         
@@ -245,7 +245,7 @@ class SelfsupervisedDiffusionTracker():
 
         wandb.init(entity=self.config['wandb']['entity'],
           project=self.config['wandb']['project'],
-          mode="disabled",
+          #mode="disabled",
           config=self.config)
         
         
@@ -266,8 +266,16 @@ class SelfsupervisedDiffusionTracker():
         target_points = target_points[:query_points.shape[0]]
         occluded = occluded[:query_points.shape[0]]
 
-        of_point_pairs = torch.load(self.of_point_pair_path)
+        of_point_pairs = torch.load(self.of_point_pair_path).to(device)
         of_point_pairs = of_point_pairs[of_point_pairs[:, 3] < N_FRAMES]
+
+        permutation = np.random.permutation(of_point_pairs.shape[0])
+        of_point_pairs = of_point_pairs[permutation]
+        of_point_pairs = of_point_pairs[:N_POINTS]
+
+        print(of_point_pairs.shape)
+
+        of_point_pairs = (of_point_pairs[:,:3], of_point_pairs[:, 3:])
 
 #For visually inspecting OF point pairs
 #        video_tensor = video_tensor.cpu()
@@ -278,8 +286,6 @@ class SelfsupervisedDiffusionTracker():
 #            point_pair = [(of_point_pairs[idx][1], of_point_pairs[idx][2]), (of_point_pairs[idx][4], of_point_pairs[idx][5])]
 #
 #            plot_images_with_points(images, point_pair)
-
-        print(of_point_pairs[0].shape)
 
         total_iterations = self.config["total_iterations"]
 
@@ -308,31 +314,28 @@ class SelfsupervisedDiffusionTracker():
             for batch_idx, of_point_pair_batch in enumerate(self.get_of_point_pair_batch(of_point_pairs, batch_size=BATCH_SIZE)):
 
                 with torch.set_grad_enabled(True):
-                    residual_features = self.residual_block(video_tensor)
-                    refined_features = features + residual_features
+                    refined_features = features + self.residual_block(video_tensor)
 
-                    wandb.log({"residual_features": residual_features.norm(), "features": features.norm()})
-
-                    #loss = self.loss_of(of_point_pair_batch, refined_features)
-                    loss = self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
-                    if(iter > 70):
-                        loss += 0.1 * self.loss_of(of_point_pair_batch, refined_features)
+                    loss = self.loss_of(of_point_pair_batch, refined_features)
+                    loss += 0.001 * self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                    #if(iter > 70):
+                    #    loss += 0.1 * self.loss_of(of_point_pair_batch, refined_features)
 
                     #pred_points = self.track_model.forward_skip(refined_features, query_points)
                     #running_loss = self.huber(pred_points, target_points)
 
-                    loss = loss / ACCUM_ITER
+                    #loss = loss / ACCUM_ITER
 
                     loss.backward()
 
                     # weights update
-                    if ((batch_idx + 1) % ACCUM_ITER == 0) or (batch_idx + 1 == of_point_pairs[0].shape[0] // BATCH_SIZE):
+                    #if ((batch_idx + 1) % ACCUM_ITER == 0) or (batch_idx + 1 == of_point_pairs[0].shape[0] // BATCH_SIZE):
                         #wandb.log({"gradients": plot_grad_flow(self.residual_block.named_parameters())})
                         #plt.close()
 
-                        self.optimizer.step()
-                        self.scheduler.step()
-                        self.optimizer.zero_grad()
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
 
                 norm_res = 0
                 norm_track = 0
@@ -359,18 +362,3 @@ if __name__ == "__main__":
     dt = SelfsupervisedDiffusionTracker()
     dt.train()
     torch.save(dt.model.state_dict(), 'unsupervised.pth')
-
-
-
-
-
-
-
-
-
-            
-
-
-
-
-
