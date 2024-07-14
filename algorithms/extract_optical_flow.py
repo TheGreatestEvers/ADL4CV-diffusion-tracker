@@ -96,13 +96,13 @@ def plot_images_with_points(images, points):
         ax.imshow(img)
         
         # Get the point coordinates
-        x, y = points[i]
+        t, y, x = points[i]
         
         # Draw the point on the image
-        ax.plot(y, x, 'ro')  # 'ro' means red color, circle marker
+        ax.plot(x, y, 'ro')  # 'ro' means red color, circle marker
         
         # Optionally, set titles for each subplot
-        ax.set_title(f'Image {i + 1}')
+        ax.set_title(f'Frame {int(t)}, {int(y)}, {int(x)}')
     
     plt.show()
 

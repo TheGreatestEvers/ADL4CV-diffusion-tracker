@@ -54,7 +54,9 @@ if __name__ == "__main__":
 
         trajectory_path = os.path.join('a_video_dir', 'video_' + str(i), 'of_trajectories.pt')
 
-        subprocess.run(["python", "extract_trajectories.py", "--frames-path", video_folder, "--output-path", trajectory_path, "--feature-path", feature_path])
+        mask_path = os.path.join('a_video_dir', 'video_' + str(i), 'mask')
+
+        subprocess.run(["python", "extract_trajectories.py", "--frames-path", video_folder, "--output-path", trajectory_path, "--feature-path", feature_path, "--mask-path", mask_path])
 
         if i >= 0:
             break

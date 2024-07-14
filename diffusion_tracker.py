@@ -245,7 +245,7 @@ class SelfsupervisedDiffusionTracker():
 
         wandb.init(entity=self.config['wandb']['entity'],
           project=self.config['wandb']['project'],
-          #mode="disabled",
+          mode="disabled",
           config=self.config)
         
         
@@ -275,17 +275,18 @@ class SelfsupervisedDiffusionTracker():
 
         print(of_point_pairs.shape)
 
-        of_point_pairs = (of_point_pairs[:,:3], of_point_pairs[:, 3:])
-
 #For visually inspecting OF point pairs
 #        video_tensor = video_tensor.cpu()
+#        of_point_pairs = of_point_pairs.cpu()
 #        while True:
 #            idx = randint(0, of_point_pairs.shape[0])
 #            images = torch.cat((video_tensor[of_point_pairs[idx][0].long()].unsqueeze(0), video_tensor[of_point_pairs[idx][3].long()].unsqueeze(0)), dim=0)
 #
-#            point_pair = [(of_point_pairs[idx][1], of_point_pairs[idx][2]), (of_point_pairs[idx][4], of_point_pairs[idx][5])]
+#            point_pair = [(of_point_pairs[idx][0], of_point_pairs[idx][1], of_point_pairs[idx][2]), (of_point_pairs[idx][3], of_point_pairs[idx][4], of_point_pairs[idx][5])]
 #
 #            plot_images_with_points(images, point_pair)
+
+        of_point_pairs = (of_point_pairs[:,:3], of_point_pairs[:, 3:])
 
         total_iterations = self.config["total_iterations"]
 

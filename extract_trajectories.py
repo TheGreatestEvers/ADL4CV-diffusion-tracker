@@ -9,6 +9,7 @@ from tqdm import tqdm
 from tqdm.contrib import tzip
 from matplotlib import pyplot as plt
 import os
+from PIL import Image
 import pickle
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -161,11 +162,40 @@ def compute_direct_flows_for_start_frame(
     return forward_flows.permute(0, 2, 3, 1), mask.to(torch.float32) # (t-1) x h x w x 2, (t-1) x h x w
 
 
+def load_mask_frames_to_bool_tensor(directory, frame_shape):
+    """
+    Load mask frames from a directory and convert them to a boolean video tensor.
+
+    Args:
+    directory (str): Path to the directory containing mask frames.
+    frame_shape (tuple): The expected shape of the frames (height, width).
+
+    Returns:
+    torch.Tensor: A boolean tensor of shape (num_frames, height, width).
+    """
+    mask_frames = []
+    for filename in sorted(os.listdir(directory)):
+        if filename.endswith(('.png', '.jpg', '.jpeg')):  # Assuming image files are in these formats
+            filepath = os.path.join(directory, filename)
+            with Image.open(filepath) as img:
+                img_resized = img.resize(frame_shape, Image.Resampling.LANCZOS)
+                img_gray = img_resized.convert('L')  # Convert to grayscale
+                img_array = torch.tensor(np.asarray(img_gray), dtype=torch.uint8)
+                bool_frame = img_array > 0  # Convert to boolean
+                mask_frames.append(bool_frame)
+
+    # Convert list to a PyTorch tensor
+    video_tensor = torch.stack(mask_frames)
+
+    return video_tensor
+
+
 @torch.no_grad()
 def save_trajectories(args):
     print(args)
 
     frames_path = args.frames_path
+    mask_path = args.mask_path
     output_path = args.output_path
     infer_res_size = args.infer_res_size # (h, w)
     threshold = args.threshold
@@ -273,7 +303,9 @@ def save_trajectories(args):
     with open(feature_path, 'rb') as dataset_file:
             dataset = pickle.load(dataset_file)
 
-    query_points = torch.tensor(dataset[0]['query_points'][0])
+    mask_frames = load_mask_frames_to_bool_tensor(mask_path, (h,w))
+
+    query_points = torch.tensor(dataset['query_points'][0])
 
     for trajectory in all_filtered_trajectories:
         # Create a mask for non-NaN values
@@ -288,9 +320,12 @@ def save_trajectories(args):
         
         query_point = torch.tensor((start_idx, trajectory[start_idx, 1], trajectory[start_idx, 0]))
 
-        check_query_points = query_points[(start_idx - query_points[:, 0]) <= 3]
+#        check_query_points = query_points[(start_idx - query_points[:, 0]) <= 1]
+#
+#        if not torch.any((query_point[1:] - check_query_points[:, 1:]).norm(dim=-1) <= 2):
+#            continue
 
-        if not torch.any((query_point[1:] - check_query_points[:, 1:]).norm(dim=-1) <= 1):
+        if not mask_frames[query_point[0].long(), query_point[1].long(), query_point[2].long()]:
             continue
         
         # Mask the valid trajectory points starting from start_idx + 1
@@ -325,6 +360,7 @@ if __name__ == "__main__":
     parser.add_argument("--frames-path", type=str, default=None, help="Path to frames folder")
     parser.add_argument("--output-path", type=str, required=True)
     parser.add_argument("--feature-path", type=str, required=True, help="Path to feature folder")
+    parser.add_argument("--mask-path", type=str, default=None, help="Path to mask folder")
     parser.add_argument("--infer-res-size", type=int, nargs=2, default=None, help="Inference resolution size, (h, w)")
     parser.add_argument("--threshold", type=float, default=1, help="Threshold for cycle consistency error")
     parser.add_argument("--min-trajectory-length", type=int, default=2, help="Minimum trajectory length")
