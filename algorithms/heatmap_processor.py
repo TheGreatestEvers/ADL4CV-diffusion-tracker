@@ -60,11 +60,11 @@ class HeatmapProcessor(torch.nn.Module):
         # Add channel dim and reshape to N*F, C, H, W
         heatmaps = heatmaps.unsqueeze(2).view(N*F, 1, H, W)
 
-        heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
-        heatmaps = self.relu(heatmaps)
+        #heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
+        #heatmaps = self.relu(heatmaps)
 
         # Position inference
-        heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
+        #heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
 
         heatmaps = heatmaps.squeeze()
         heatmaps = heatmaps.view(-1, H*W)

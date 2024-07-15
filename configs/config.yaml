@@ -1,7 +1,7 @@
 dataset_dir: output/features/davis/
 learning_rate: !!float 0.001
 total_iterations: 1500
-eval_freq: 3
+eval_freq: 20
 
 wandb:
   project: 'diffusion-tracker'

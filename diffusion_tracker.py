@@ -89,7 +89,7 @@ class SelfsupervisedDiffusionTracker():
         self.config = read_config_file("configs/config.yaml")
 
         dataset = FeatureDataset(feature_dataset_path=self.config['dataset_dir'])
-        self.data = dataset[VIDEO_IDX][0]
+        self.data = dataset[VIDEO_IDX]
 
         self.of_point_pair_path = os.path.join('a_video_dir', 'video_' + str(VIDEO_IDX), 'of_trajectories.pt')
 
@@ -104,6 +104,40 @@ class SelfsupervisedDiffusionTracker():
         self.mse = torch.nn.MSELoss()
         self.huber = torch.nn.HuberLoss()
         self.loss_fn_infonce = InfoNCE(negative_mode='paired')
+
+        self.max_eval_score = 0
+
+    def prior_loss(self, features, refinded_features):
+        """
+        Computes the L_prior loss term as given in the equation.
+
+        Args:
+            features (torch.Tensor): Feature map of shape (F, C, H, W)
+            refinded_features (torch.Tensor): Feature map of shape (F, C, H, W)
+
+        Returns:
+            torch.Tensor: The computed L_prior loss.
+        """
+        # Ensure the feature maps have the same spatial dimensions
+        assert features.shape == refinded_features.shape, "Feature maps must have the same shape"
+
+        # Compute the L2 norms of the feature maps along the channel dimension
+        norm_features = torch.norm(features, p=2, dim=1)
+        norm_refinded_features = torch.norm(refinded_features, p=2, dim=1)
+
+        # Compute L_norm term
+        L_norm = (1 - (norm_refinded_features / norm_features)).abs().mean(dim=[1,2])
+
+        # Compute cosine similarity between feature maps
+        cos_sim = func.cosine_similarity(refinded_features, features, dim=1)
+
+        # Compute L_angle term
+        L_angle = (1 - cos_sim.mean(dim=[1, 2])).abs()
+
+        # Compute the final L_prior term
+        L_prior = (L_norm + L_angle).mean()
+
+        return L_prior
 
     def contrastive_loss(self, query_points, target_points, features):
         F, C, H, W = features.shape
@@ -189,9 +223,6 @@ class SelfsupervisedDiffusionTracker():
         batch_gt_occluded = []
         batch_gt_point = []
         batch_pred_point = []
-
-        self.residual_block.eval()
-        self.track_model.eval()
         
         with torch.no_grad():
             refined_features = features + self.residual_block(video_tensor)
@@ -211,9 +242,6 @@ class SelfsupervisedDiffusionTracker():
 
         metrics = compute_tapvid_metrics(query_points=np.array(batch_query_point), gt_occluded=np.array(batch_gt_occluded), gt_tracks=np.array(batch_gt_point), pred_occluded=np.array(batch_gt_occluded), pred_tracks=np.array(batch_pred_point), query_mode='strided')
         print(metrics)
-
-        self.residual_block.train()
-        self.track_model.train()
 
         return metrics['average_pts_within_thresh']
 
@@ -247,6 +275,9 @@ class SelfsupervisedDiffusionTracker():
           project=self.config['wandb']['project'],
           #mode="disabled",
           config=self.config)
+
+        os.makedirs('models' ,exist_ok=True)
+        self.model_path = os.path.join('models', wandb.run.name + '.pt')
         
         
         features = self.data[FEATURE_TYPE].to(device)
@@ -301,31 +332,14 @@ class SelfsupervisedDiffusionTracker():
             
             running_loss = 0
 
-#            residual_features = self.residual_block(video_tensor)
-#            refined_features = features + residual_features
-#            pred_points = self.track_model.forward_skip(refined_features, query_points)
-#
-#            print(torch.cat([pred_points, target_points], dim=-1))
-#
-#            running_loss = self.huber(pred_points, target_points)
-#
-#            running_loss.backward()
-#            self.optimizer.step()
-#            self.scheduler.step()
-#            self.optimizer.zero_grad()
-
             for batch_idx, of_point_pair_batch in enumerate(self.get_of_point_pair_batch(of_point_pairs, batch_size=BATCH_SIZE)):
 
                 with torch.set_grad_enabled(True):
                     refined_features = features + self.residual_block(video_tensor)
 
-                    loss = self.loss_of(of_point_pair_batch, refined_features)
-                    loss += 0.001 * self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
-                    #if(iter > 70):
-                    #    loss += 0.1 * self.loss_of(of_point_pair_batch, refined_features)
-
-                    #pred_points = self.track_model.forward_skip(refined_features, query_points)
-                    #running_loss = self.huber(pred_points, target_points)
+                    loss = self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                    loss += 0.01 * self.prior_loss(features, refined_features)
+                    #loss += 0.001 * self.loss_of(of_point_pair_batch, refined_features) 
 
                     #loss = loss / ACCUM_ITER
 
@@ -340,22 +354,33 @@ class SelfsupervisedDiffusionTracker():
                     self.scheduler.step()
                     self.optimizer.zero_grad()
 
-                norm_res = 0
-                norm_track = 0
-                #norm_res = torch.nn.utils.clip_grad_norm_(self.residual_block.parameters(), 100)
-                #norm_track = torch.nn.utils.clip_grad_norm_(self.track_model.parameters(), 100)
-                #self.optimizer.step()
-                #self.scheduler.step()
-
                 running_loss += loss
 
-            print(f"{iter}: loss: {running_loss:.4f} | norm-residual: {norm_res:.4f} | norm-track: {norm_track:.4f}")
+            print(f"{iter}: loss: {running_loss:.4f}")
             
             wandb.log({"running_loss": running_loss})
 
             if iter % self.config['eval_freq'] == 0:
-                eval_error = self.evaluate(query_points, target_points, occluded, features, video_tensor)
-                wandb.log({"evaluation": eval_error})
+                self.residual_block.eval()
+                self.track_model.eval()
+
+                eval_score = self.evaluate(query_points, target_points, occluded, features, video_tensor)
+                wandb.log({"evaluation": eval_score})
+                
+                if eval_score > self.max_eval_score:
+                    self.max_eval_score = eval_score
+                    print("New best eval score: ", self.max_eval_score)
+
+                    torch.save({
+                        'epoch': iter,
+                        'residual_state_dict': self.residual_block.state_dict(),
+                        'processor_state_dict': self.track_model.heatmap_processor.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.scheduler.state_dict(),
+                        }, self.model_path)
+
+                self.residual_block.train()
+                self.track_model.train()
 
         wandb.finish()    
 
