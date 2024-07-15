@@ -42,7 +42,7 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, collate_fn=feature_collate_fn)
 
     for i, data in enumerate(dataloader):
-        data = data[0][0]
+        data = data[0]
 
         video_folder = os.path.join('a_video_dir', 'video_' + str(i), 'video')
 

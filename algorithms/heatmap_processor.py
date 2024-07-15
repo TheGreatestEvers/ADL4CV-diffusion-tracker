@@ -57,21 +57,28 @@ class HeatmapProcessor(torch.nn.Module):
 
         N, F, H, W = heatmaps.shape
 
+        # Flatten the heatmaps for argmax calculation
+        heatmaps_flat = heatmaps.view(N*F, H*W)
+        argmax_flat = torch.argmax(heatmaps_flat, dim=-1)
+
+        # Convert flat indices to (x, y) coordinates
+        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+
         # Add channel dim and reshape to N*F, C, H, W
         heatmaps = heatmaps.unsqueeze(2).view(N*F, 1, H, W)
 
-        #heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
-        #heatmaps = self.relu(heatmaps)
+        heatmaps = self.heatmap_processing_layers["hid1"](heatmaps)
+        heatmaps = self.relu(heatmaps)
 
         # Position inference
-        #heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
+        heatmaps = self.heatmap_processing_layers["hid2"](heatmaps)
 
         heatmaps = heatmaps.squeeze()
         heatmaps = heatmaps.view(-1, H*W)
         heatmaps = self.softmax(heatmaps)
 
-        argmax_flat = torch.argmax(heatmaps, dim=-1)
-        argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
+        #argmax_flat = torch.argmax(heatmaps, dim=-1)
+        #argmax_indices = torch.stack((argmax_flat // W, argmax_flat % W), dim=-1)
 
         points = self.soft_argmax(heatmaps.view(-1, H, W), argmax_indices)
         

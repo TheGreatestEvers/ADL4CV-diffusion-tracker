@@ -327,9 +327,9 @@ class SelfsupervisedDiffusionTracker():
 
         print(of_point_pairs.shape)
 
-        permutation = np.random.permutation(of_point_pairs.shape[0])
-        of_point_pairs = of_point_pairs[permutation]
-        of_point_pairs = of_point_pairs[:N_POINTS]
+        #permutation = np.random.permutation(of_point_pairs.shape[0])
+        #of_point_pairs = of_point_pairs[permutation]
+        #of_point_pairs = of_point_pairs[:N_POINTS]
 
         print(of_point_pairs.shape)
 
@@ -360,7 +360,7 @@ class SelfsupervisedDiffusionTracker():
             running_prior_loss = 0
             running_skip_loss = 0
 
-            for batch_idx, of_point_pair_batch in enumerate(self.get_of_point_pair_batch(of_point_pairs, batch_size=BATCH_SIZE)):
+            for batch_idx, of_point_pair_batch in enumerate(self.get_of_point_pair_batch(of_point_pairs, batch_size=BATCH_SIZE, points_per_batch=N_POINTS)):
 
                 with torch.set_grad_enabled(True):
                     refined_features = features + self.residual_block(video_tensor)

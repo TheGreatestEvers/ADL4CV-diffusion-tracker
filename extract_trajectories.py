@@ -305,7 +305,7 @@ def save_trajectories(args):
 
     mask_frames = load_mask_frames_to_bool_tensor(mask_path, (h,w))
 
-    query_points = torch.tensor(dataset[0]['query_points'])
+    query_points = torch.tensor(dataset['query_points'])
 
     for trajectory in all_filtered_trajectories:
         # Create a mask for non-NaN values
