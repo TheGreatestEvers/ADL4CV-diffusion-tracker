@@ -94,7 +94,7 @@ class SelfsupervisedDiffusionTracker():
         self.of_point_pair_path = os.path.join('a_video_dir', 'video_' + str(VIDEO_IDX), 'of_trajectories.pt')
 
         self.track_model = TrackingModel().to(device)
-        self.residual_block = ResidualFeatureBlock(intermediate_channels=[32, 64], n_output_channels=N_CHANNELS).to(device)
+        self.residual_block = ResidualFeatureBlock(intermediate_channels=self.config['residual_layers'], n_output_channels=N_CHANNELS).to(device)
 
         params = list(self.track_model.parameters()) + list(self.residual_block.parameters())
         self.optimizer = torch.optim.AdamW(params, lr=self.config['learning_rate'])        
@@ -104,6 +104,10 @@ class SelfsupervisedDiffusionTracker():
         self.mse = torch.nn.MSELoss()
         self.huber = torch.nn.HuberLoss()
         self.loss_fn_infonce = InfoNCE(negative_mode='paired')
+
+        self.contrastive_weight = self.config['contrastive_weight']
+        self.prior_weight = self.config['prior_weight']
+        self.skip_weight = self.config['skip_weight']
 
         self.max_eval_score = 0
 
@@ -194,19 +198,27 @@ class SelfsupervisedDiffusionTracker():
 
         return loss_long
     
-    def loss_skip(self, og_query_points, pred_endpoints, reverse_slim_feat_dict):
+    def loss_skip(self, query_points, features):
         """
         Use predicted point at end of sequence as new query point. Goal is to predict original query point.
 
         Slim feature dict is in reversed frame order, so it contains the last sequence frame and then the first sequence frame.
         """
 
-        N = pred_endpoints.shape[0]
+        F, C, H, W = features.shape
+        N, _ = query_points.shape
 
-        prepended_zeros = torch.zeros(N, 1).to(device)
-        new_queries = torch.cat((prepended_zeros, pred_endpoints), dim=1)
-        pred = self.track_model.forward_skip(reverse_slim_feat_dict, new_queries)
-        loss_skip = self.mse(og_query_points[:, 1:], pred[:, -1])
+        pred_tracks = self.track_model.forward_skip(features, query_points)
+
+        rnd_idx = randint(1, F-1)
+        pred_endpoints = pred_tracks[:, rnd_idx]
+
+        new_query_points = torch.cat([rnd_idx * torch.ones([N, 1], device=device), pred_endpoints], dim=-1)
+        new_pred_tracks = self.track_model.forward_skip(features, new_query_points)
+
+        new_pred_endpoints = torch.gather(new_pred_tracks, dim=1, index=query_points[:, 0].unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 2).long()).squeeze()
+
+        loss_skip = self.huber(query_points[:, 1:], new_pred_endpoints)
 
         return loss_skip
 
@@ -245,7 +257,7 @@ class SelfsupervisedDiffusionTracker():
 
         return metrics['average_pts_within_thresh']
 
-    def get_of_point_pair_batch(self, of_point_pair,  batch_size=32, shuffle=True, drop_last=False):
+    def get_of_point_pair_batch(self, of_point_pair,  batch_size=32, shuffle=True, drop_last=False, points_per_batch=None):
         """
         Yields a tuple containing one batch of query_points, target_points, occluded, trackgroup
         """
@@ -253,7 +265,10 @@ class SelfsupervisedDiffusionTracker():
 
         if shuffle:
             permutation = np.random.permutation(num_points)
-            of_point_pair = (of_point_pair[0][permutation], of_point_pair[1][permutation])
+            of_point_pair_permute = (of_point_pair[0][permutation], of_point_pair[1][permutation])
+        
+        if points_per_batch is not None:
+            num_points = points_per_batch
 
         if drop_last:
             num_batches = num_points // batch_size
@@ -265,8 +280,8 @@ class SelfsupervisedDiffusionTracker():
             end = min((i+1)*batch_size, num_points)
 
             yield (
-                of_point_pair[0][start:end], 
-                of_point_pair[1][start:end],
+                of_point_pair_permute[0][start:end], 
+                of_point_pair_permute[1][start:end],
             )
 
     def train(self):
@@ -278,7 +293,17 @@ class SelfsupervisedDiffusionTracker():
 
         os.makedirs('models' ,exist_ok=True)
         self.model_path = os.path.join('models', wandb.run.name + '.pt')
-        
+
+        start_epoch = 0
+
+        if 'pretrained_model' in self.config.keys():
+            self.pretrained_path = os.path.join('models', self.config['pretrained_model'])
+
+            checkpoint = torch.load(self.pretrained_path)
+            self.residual_block.load_state_dict(checkpoint['residual_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch']
         
         features = self.data[FEATURE_TYPE].to(device)
         target_points = torch.tensor(self.data["target_points"][..., [1, 0]], dtype=torch.float32, device=device)[0]
@@ -324,22 +349,28 @@ class SelfsupervisedDiffusionTracker():
         total_iterations = self.config["total_iterations"]
 
         #for iter in tqdm(range(total_iterations), desc="Train iteration"):
-        for iter in range(total_iterations):
+        for iter in range(start_epoch, total_iterations):
 
             ## Train
             self.track_model.train()
             self.residual_block.train()
             
             running_loss = 0
+            running_contrastive_loss = 0
+            running_prior_loss = 0
+            running_skip_loss = 0
 
             for batch_idx, of_point_pair_batch in enumerate(self.get_of_point_pair_batch(of_point_pairs, batch_size=BATCH_SIZE)):
 
                 with torch.set_grad_enabled(True):
                     refined_features = features + self.residual_block(video_tensor)
 
-                    loss = self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
-                    loss += 0.01 * self.prior_loss(features, refined_features)
+                    contrastive_loss =  self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                    prior_loss = self.prior_loss(features, refined_features)
+                    skip_loss = self.loss_skip(of_point_pair_batch[0], refined_features)
                     #loss += 0.001 * self.loss_of(of_point_pair_batch, refined_features) 
+
+                    loss = self.contrastive_weight * contrastive_loss + self.prior_weight * prior_loss + self.skip_weight * skip_loss
 
                     #loss = loss / ACCUM_ITER
 
@@ -355,10 +386,16 @@ class SelfsupervisedDiffusionTracker():
                     self.optimizer.zero_grad()
 
                 running_loss += loss
+                running_contrastive_loss += contrastive_loss
+                running_prior_loss += prior_loss
+                running_skip_loss += skip_loss
 
             print(f"{iter}: loss: {running_loss:.4f}")
             
             wandb.log({"running_loss": running_loss})
+            wandb.log({"running_contrastive_loss": running_contrastive_loss})
+            wandb.log({"running_prior_loss": running_prior_loss})
+            wandb.log({"running_skip_loss": running_skip_loss})
 
             if iter % self.config['eval_freq'] == 0:
                 self.residual_block.eval()
@@ -389,4 +426,3 @@ if __name__ == "__main__":
 
     dt = SelfsupervisedDiffusionTracker()
     dt.train()
-    torch.save(dt.model.state_dict(), 'unsupervised.pth')
