@@ -21,12 +21,13 @@ import matplotlib.pyplot as plt
 
 device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
-N_FRAMES = 8
+N_FRAMES = 32
 N_POINTS = 512
+N_EVAL_POINTS = 32
 N_CHANNELS = 64
 ACCUM_ITER = 4
 BATCH_SIZE = 64
-VIDEO_IDX = 0
+VIDEO_IDX = 14
 FEATURE_TYPE = "better_feature" #features or better_feature
 
 def plot_grad_flow(named_parameters):
@@ -235,11 +236,21 @@ class SelfsupervisedDiffusionTracker():
         batch_gt_occluded = []
         batch_gt_point = []
         batch_pred_point = []
+
+        N, _ = query_points.shape
+
+        pred_points = []
+        heatmaps = []
         
         with torch.no_grad():
             refined_features = features + self.residual_block(video_tensor)
-            heatmaps = self.track_model.heatmap_generator.generate(refined_features, query_points)
-            pred_points = self.track_model.heatmap_processor.predictions_from_heatmap(heatmaps)
+            for i in range(0, N, N_EVAL_POINTS):
+                heatmap = self.track_model.heatmap_generator.generate(refined_features, query_points[i:min(N, i+N_EVAL_POINTS)])
+                heatmaps.append(heatmap)
+                pred_points.append(self.track_model.heatmap_processor.predictions_from_heatmap(heatmap))
+
+            pred_points = torch.cat(pred_points, dim=0)
+            heatmaps = torch.cat(heatmaps, dim=0)
 
         wandb.log({"chart1": visualize_heatmaps(video_tensor, heatmaps[4].cpu(), pred_points[4], target_points[4])})
         wandb.log({"chart2": visualize_heatmaps(video_tensor, heatmaps[5].cpu(), pred_points[5], target_points[5])})
@@ -365,7 +376,7 @@ class SelfsupervisedDiffusionTracker():
                 with torch.set_grad_enabled(True):
                     refined_features = features + self.residual_block(video_tensor)
 
-                    contrastive_loss =  self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
+                    contrastive_loss = self.contrastive_loss(of_point_pair_batch[0], of_point_pair_batch[1], refined_features)
                     prior_loss = self.prior_loss(features, refined_features)
                     skip_loss = self.loss_skip(of_point_pair_batch[0], refined_features)
                     #loss += 0.001 * self.loss_of(of_point_pair_batch, refined_features) 

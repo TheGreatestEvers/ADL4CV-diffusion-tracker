@@ -6,7 +6,7 @@ residual_layers: [8, 16, 32, 64]
 contrastive_weight: 1.
 prior_weight: 0.1
 skip_weight: 0.1
-pretrained_model: amber-shadow-351.pt
+#pretrained_model: amber-shadow-351.pt
 
 wandb:
   project: 'diffusion-tracker'
