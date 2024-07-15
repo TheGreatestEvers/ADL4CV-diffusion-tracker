@@ -183,3 +183,6 @@ logs
 wandb
 
 output
+
+*.pt 
+*.pkl
