@@ -87,7 +87,7 @@ def main():
         all_points = torch.cat(all_points)
         all_occluded = torch.cat(all_occluded)
 
-        viz.place_marker_in_frames(data["video"][0], all_points, all_occluded, folder_path=".")
+        viz.save_pred_points_as_gif(data["video"][0], all_points, all_occluded, folder_path=".")
 
         # Step 1: Swap the coordinates (y,x) -> (x,y)
         all_points = all_points[..., [1, 0]]
