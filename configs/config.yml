@@ -1,9 +1,0 @@
-dataset_dir: features/davis/
-log_dir: logs/
-batch_size: 1
-learning_rate: !!float 0.001
-epochs: 500
-
-wandb:
-  project: 'zevipo'
-  entity: 'maxis-organization'

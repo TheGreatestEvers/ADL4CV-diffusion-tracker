@@ -57,4 +57,4 @@ if __name__ == "__main__":
         mask_path = os.path.join('a_video_dir', 'video_' + str(i), 'mask')
 
         if os.path.exists(mask_path):
-            subprocess.run(["python", "extract_trajectories.py", "--frames-path", video_folder, "--output-path", trajectory_path, "--feature-path", feature_path, "--mask-path", mask_path])
+            subprocess.run(["python", "dino_tracker/extract_trajectories.py", "--frames-path", video_folder, "--output-path", trajectory_path, "--feature-path", feature_path, "--mask-path", mask_path])

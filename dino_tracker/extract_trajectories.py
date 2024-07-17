@@ -23,7 +23,7 @@ from data.data_utils import (
     resize_tensor_frames_lanczos,
     resize_flow
 )
-from utils import bilinear_interpolate_video
+from dino_tracker.utils import bilinear_interpolate_video
 
 torch.autograd.set_grad_enabled(False)
 
