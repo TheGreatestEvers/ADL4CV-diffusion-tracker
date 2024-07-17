@@ -59,3 +59,10 @@ Follow these steps to set up the project:
     ```
 
     - Note: Ensure you select the video index by setting the macro `VIDEO_IDX`.
+
+### 6. Plot and Evaluate Results
+
+1. Run the following script to evaluate the tracking results:
+    ```bash
+    python visualize_and_evaluate.py
+    ```
