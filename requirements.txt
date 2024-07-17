@@ -8,3 +8,7 @@ tensorflow
 tensorflow_datasets
 imageio
 wandb
+info-nce-pytorch
+einops
+opencv-python
+seaborn

@@ -164,7 +164,8 @@ def extract_diffusion_features(
         for data_idx, data in tqdm(enumerate(dataset_values), desc="Progress: "):
 
             prompt = ""
-            with open(os.path.join(input_dataset_paths[dataset_name], 'prompts', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
+            
+            with open(os.path.join('tapvid_davis_prompts', 'prompt_' + f'{data_idx:03}' + '.txt'), 'r') as prompt_file:
                 prompt = prompt_file.read()
 
                 prompt_file.close()

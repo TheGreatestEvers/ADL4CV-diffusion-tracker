@@ -1,8 +1,11 @@
 import torch
-import numpy as np
 import math
+import torch.nn.functional as func
 
-class HeatmapGenerator:
+#device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
+device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
+
+class HeatmapGenerator():
     """
     Used for generating Heatmaps
     """
@@ -10,88 +13,39 @@ class HeatmapGenerator:
     def __init__(self) -> None:
         ...
     
-    def generate(self, feature_maps, targets, device="cuda", mode="keep_feat_vec"):
+    def generate(self, features, query_points):
         """
         Generates Heatmaps.
 
         Args:
-            features_maps: Tensor with concatenation of feature maps. Dimension: [Frames, Channels, Height, Width]
-            targets: Tensor of point coordinates to track. Dimensions: [N, 3] with point format: (Time, y, x)
-            mode: Either "keep_feat_vec" or "resample_feat_vec". First uses feature vector from inital point to generate heatmaps for all
-                  frames latter, latter resamples features vector after each point estimation 
+            features: Tensor with concatenation of feature maps. Dimension: [Frames, Channels, Height, Width]
+            query_points: Tensor of point coordinates to track. Dimensions: [N, 3] with point format: (Time, y, x)
 
         Returns:
             heatmaps: Tensor of Heatmaps. Dimension: [NumPoints, Frames, Height, Width]
         """
-        feature_maps = feature_maps.to(dtype=torch.float32).to(device=device)
-        targets = targets.to(device)
-
-        if feature_maps.shape[-1] != feature_maps.shape[-2]:
-            ValueError("Featuremaps should have dimensions [Frames, Channels, Height, Width]")
-
-        if feature_maps.dtype != torch.float32:
-            feature_maps = feature_maps.float()
         
-        F, C, H, W = feature_maps.shape
-        N, _ = targets.shape
-        
-        if mode == "keep_feat_vec":
+        F, C, H, W = features.shape
+        N, _ = query_points.shape
 
-            targets_proj = self.__project_point_coordinates(targets, spatial_latent_space=H)
+        targets_feat_vecs = self.bilinear_sampler(features, query_points)
 
-            targets_feat_vecs = self.__get_feature_vec_bilinear(feature_maps, targets_proj)
+        heatmaps = torch.zeros(N, F, H, W, device=device)
 
+        for i, target_feat_vec in enumerate(targets_feat_vecs):
+            
+            # Create heatmaps using cosine-similarity
+            norm_target_feat_vec = torch.norm(target_feat_vec, dim=0, keepdim=True)
+            norm_feat_vecs = torch.norm(features, dim=1, keepdim=True)
 
-            heatmaps = torch.zeros(N, F, H, W).to(device)
-            for i, feat_vec in enumerate(targets_feat_vecs):
+            heatmap = torch.sum(features * target_feat_vec.view(1, C, 1, 1), dim=1, keepdim=True) 
+            heatmap = heatmap / torch.maximum(norm_target_feat_vec * norm_feat_vecs, 1e-8 * torch.ones_like(norm_feat_vecs))
 
-                feat_vec = feat_vec.view(1, -1, 1, 1)  
-                feat_vec = feat_vec.expand(F, C, H, W)
-                
-                # Create heatmaps using cosine-similarity
-                norm_target_feat_vec = torch.norm(feat_vec, dim=1, keepdim=True)
-                norm_feat_vecs = torch.norm(feature_maps, dim=1, keepdim=True)
-
-                heatmap = torch.sum(feature_maps * feat_vec, dim=1, keepdim=True) 
-                heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
-
-                heatmaps[i] = heatmap.squeeze()
-
-        elif mode == "resample_feat_vec": 
-
-            NotImplementedError("Resample feat vec mode not implemented for multiple point tracking.")
-            # tracker = ZeroShotTracker()
-            # heatmaps = torch.zeros(F, 1, 32, 32)
-            # for t in range(F):
-            #     point_proj = self.__project_point_coordinates(target_coordinates)
-
-            #     target_feat_vec = self.__get_feature_vec_bilinear(feature_maps, point_proj)
-
-            #     feat_map = feature_maps[t]
-
-            #     target_feat_vec = target_feat_vec.view(1, 1, -1)  
-            #     target_feat_vec = target_feat_vec.expand(C, H, W)
-
-            #     norm_target_feat_vec = torch.norm(target_feat_vec, dim=0, keepdim=True)
-            #     norm_feat_vecs = torch.norm(feat_map, dim=0, keepdim=True)
-
-            #     heatmap = torch.sum(feat_map * target_feat_vec, dim=0, keepdim=True) 
-            #     heatmap = heatmap / (norm_target_feat_vec * norm_feat_vecs)
-
-            #     heatmap = heatmap.unsqueeze(0)
-
-            #     track_estimation = tracker.track(heatmap)[0]
-
-            #     target_coordinates = (t+1, track_estimation[0].numpy(), track_estimation[1].numpy())
-
-            #     heatmaps[t] = heatmap[0]
-
-        else:
-            raise ValueError("Mode has to be either keep_feat_vec or resample_feat_vec.")
+            heatmaps[i] = heatmap.squeeze()
 
         return heatmaps
 
-    def __project_point_coordinates(self, targets_input_space, spatial_input_space=256, spatial_latent_space=32):
+    def __project_point_coordinates(self, targets, spatial_input_space=256, spatial_latent_space=32):
         """
         Get Point Coordinates in Latent Space. Assumes quadratic spatial dimensions of input and latent space.
 
@@ -105,9 +59,9 @@ class HeatmapGenerator:
         """
 
         factor = spatial_latent_space / spatial_input_space 
-        targets_latent_space = targets_input_space * torch.tensor([1, factor, factor]).to(targets_input_space.device)
+        targets[:, 1:] *= factor # Targets to latent space
 
-        return targets_latent_space
+        return targets
     
     def __get_feature_vec_bilinear(self, feature_maps, targets):
         """
@@ -120,35 +74,71 @@ class HeatmapGenerator:
         Returns: Tensor with feature vectors at point locations. Dimension: [N, Channels]
         """
 
-        feat_vecs = torch.zeros(targets.shape[0], feature_maps.shape[1]).to(feature_maps.device)
-        for i, target in enumerate(targets):
+        N = targets.shape[0]
+        feat_vecs = torch.zeros(N, feature_maps.shape[1], device=feature_maps.device)
 
-            t, y, x = target
-            t = t.item()
-            y = y.item()
-            x = x.item()
+        # Extract target coordinates
+        t = targets[:, 0].long()  # Time dimension
+        y = targets[:, 1]  # y dimension
+        x = targets[:, 2]  # x dimension
 
-            feat_map_t = feature_maps[int(t)].unsqueeze(0) # 1, C, H, W
+        # Get integer and fractional parts
+        x_int = x.floor().long()
+        x_frac = x - x_int.float()
+        y_int = y.floor().long()
+        y_frac = y - y_int.float()
 
-            x_int = math.floor(x)
-            x_frac = x - x_int
+        # Gather values from tensor1 using advanced indexing
+        Q11 = feature_maps[t, :, y_int, x_int]
+        Q12 = feature_maps[t, :, y_int, x_int+1]
+        Q21 = feature_maps[t, :, y_int+1, x_int]
+        Q22 = feature_maps[t, :, y_int+1, x_int+1]
 
-            y_int = math.floor(y)
-            y_frac = y - y_int
-
-            # Scale frac part to be in range [-1, 1]
-            x_grid = ( (x_frac - 0) / (1 - 0) ) * (1 - -1) + -1
-            y_grid = ( (y_frac - 0) / (1 - 0) ) * (1 - -1) + -1
-
-            grid = torch.tensor(
-                [[[[x_grid, y_grid]]]], dtype=torch.float32
-            ).to(feature_maps.device)
-
-            # 1xCx2x2 Tensor used for interpolation
-            feat_map_t_2x2 = feat_map_t[:, :, y_int:y_int+2, x_int:x_int+2]
-
-            feat_vec = torch.nn.functional.grid_sample(feat_map_t_2x2, grid, mode="bilinear", align_corners=True).squeeze().squeeze()
-
-            feat_vecs[i] = feat_vec
+        # Interpolated values
+        feat_vecs = Q11 * (1 - x_frac).view(N,1) * (1 - y_frac).view(N,1) \
+            + Q12 * (x_frac).view(N,1) * (1 - y_frac).view(N,1) \
+            + Q21 * (y_frac).view(N,1) * (1 - x_frac).view(N,1) \
+            + Q22 * (x_frac).view(N,1) * (y_frac).view(N,1)
 
         return feat_vecs
+
+    def bilinear_sampler(self, tensor, points, mode='bilinear'):
+        """
+        Args:
+        - tensor: A tensor of shape (F, C, H, W)
+        - points: A tensor of shape (N, 3) where each point has coordinates (t, y, x)
+        - mode: Interpolation mode (default is 'bilinear')
+        - mask: Boolean flag to return mask of valid points (default is False)
+
+        Returns:
+        - sampled_vectors: A tensor of shape (N, C) with sampled vectors
+        - mask (optional): A tensor of shape (N, 1) indicating valid points if mask=True
+        """
+        F, C, H, W = tensor.shape
+        N = points.shape[0]
+        
+        # Extract t, y, x coordinates
+        t = points[:, 0].long()  # t should be integer indices for the first dimension
+        y = points[:, 1]
+        x = points[:, 2]
+        
+        # Normalize the y and x coordinates to [-1, 1]
+        y = 2 * y / (H - 1) - 1
+        x = 2 * x / (W - 1) - 1
+
+        # Create the grid for grid_sample
+        grids = torch.stack((x, y), dim=-1).view(N, 1, 1, 2)
+        
+        # Sample the tensor at each t index
+        sampled_vectors = []
+
+        for i in range(N):
+            # Select the specific t entry
+            img_slice = tensor[t[i]].unsqueeze(0)  # shape (1, C, H, W)
+            # Sample using grid_sample
+            sampled = func.grid_sample(img_slice, grids[i].unsqueeze(0), align_corners=True)
+            sampled_vectors.append(sampled.squeeze())  # shape (C,)
+            
+        sampled_vectors = torch.stack(sampled_vectors)  # shape (N, C)
+
+        return sampled_vectors

@@ -177,9 +177,21 @@ tapvid_davis.pkl
 
 video_*
 
-*.pkl
+#*.pkl
 
 davis
 
 logs
 wandb
+
+output
+
+goat_feature_tensor.pt
+
+.vscode
+
+models
+
+480p
+
+plots

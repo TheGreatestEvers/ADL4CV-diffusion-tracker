@@ -1,9 +1,11 @@
 import torch
+from torchvision.transforms.functional import resize 
 from algorithms.heatmap_generator import HeatmapGenerator
-from algorithms.zero_shot_tracker import ZeroShotTracker
+from algorithms.heatmap_processor import HeatmapProcessor
 from algorithms.feature_extraction_loading import concatenate_video_features
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#device = torch.device('cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu'))
+device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 
 class WeightedFeaturesTracker(torch.nn.Module):
     """
@@ -14,13 +16,15 @@ class WeightedFeaturesTracker(torch.nn.Module):
         super().__init__()
 
         self.heatmap_generator = HeatmapGenerator()
-        self.tracker = ZeroShotTracker()
+        self.heatmap_processor = HeatmapProcessor()
+
+        self.softmax = torch.nn.Softmax()
 
         # Create parameter dict
         self.params = torch.nn.ParameterDict()
 
         for block_name, block_feature_list in feature_dict.items():
-            self.params[block_name] = torch.nn.Parameter(torch.randn(len(block_feature_list)))
+            self.params[block_name] = torch.nn.Parameter(torch.ones(len(block_feature_list)))
 
 
 
@@ -42,12 +46,16 @@ class WeightedFeaturesTracker(torch.nn.Module):
         concat_features = concatenate_video_features(feature_dict)
 
         # Calculate heatmaps
-        hmps = self.heatmap_generator.generate(concat_features, query_points, device=device)
+        hmps = self.heatmap_generator.generate(concat_features, query_points)
 
         # Tracking
-        tracks = self.tracker.track(hmps)
+        tracks = self.heatmap_processor.(hmps)
 
-        return tracks
+        # Also return softmax heatmaps
+        N, F, H, W = hmps.shape
+        hmps_softmax = self.softmax(hmps.view(N, F, -1)).view(N, F, H, W)
+
+        return (tracks, hmps_softmax)
 
 
 class WeightedHeatmapsTracker(torch.nn.Module):
@@ -65,7 +73,8 @@ class WeightedHeatmapsTracker(torch.nn.Module):
         self.params = torch.nn.ParameterDict()
 
         for block_name, block_feature_list in feature_dict.items():
-            self.params[block_name] = torch.nn.Parameter(torch.randn(len(block_feature_list)))
+            print(block_name)
+            self.params[block_name] = torch.nn.Parameter(torch.ones(len(block_feature_list)))
 
 
 
@@ -85,9 +94,9 @@ class WeightedHeatmapsTracker(torch.nn.Module):
 
         for block_name, block_feature_list in feature_dict.items():
             for i, block_features in enumerate(block_feature_list):
-                concat_features = concatenate_video_features(block_features, force_max_spatial=256)
+                resized_features = resize(block_features,  (256, 256))
 
-                hmps = self.heatmap_generator.generate(concat_features, query_points, device=device)
+                hmps = self.heatmap_generator.generate(resized_features, query_points)
 
                 # Apply weight to heatmap
                 hmps *= self.params[block_name][i]

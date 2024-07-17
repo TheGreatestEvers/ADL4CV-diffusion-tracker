@@ -41,8 +41,25 @@ class DiffusionWrapper:
         #self.text_encoder = self.text_encoder.to(self.device)
         #self.unet = self.unet.to(self.device)
 
-        self.feature_maps = {'up_block': [], 'down_block': [], 'mid_block': [], 'decoder_block': []}
+        self.feature_maps = {'encoder_block': [], 'up_block': [], 'down_block': [], 'mid_block': [], 'decoder_block': []}
         self.hooks = []
+
+        def hook_feat_map_encoder(mod, inp, out):
+            # encoder_feature_maps = self.feature_maps['encoder_block']
+
+            # for featmap in encoder_feature_maps:
+            #     print(featmap.shape)
+
+            # if out.shape[1:-1] not in [encoder_feature_map.shape[1:-1] for encoder_feature_map in encoder_feature_maps]:
+            #     encoder_feature_maps.append(out.cpu())
+            # else:
+            #     for idx, encoder_feature_map in enumerate(encoder_feature_maps):
+            #         if encoder_feature_map.shape[1:-1] == out.shape[1:-1]:
+            #             encoder_feature_maps[idx] = torch.cat((encoder_feature_map, out.cpu()), dim=0)
+            
+            # self.feature_maps['encoder_block'] = encoder_feature_maps
+            self.feature_maps['encoder_block'].append(out.cpu())
+
 
         def hook_feat_map_up(mod, inp, out):
             self.feature_maps['up_block'].append(out.cpu())
@@ -51,14 +68,21 @@ class DiffusionWrapper:
         def hook_feat_map_mid(mod, inp, out):
             self.feature_maps['mid_block'].append(out.cpu())
         def hook_feat_map_decoder(mod, inp, out):
-            decoder_feature_maps = self.feature_maps['decoder_block']
+            # decoder_feature_maps = self.feature_maps['decoder_block']
 
-            if out.shape[1:-1] not in [decoder_feature_map.shape[1:-1] for decoder_feature_map in decoder_feature_maps]:
-                decoder_feature_maps.append(out.cpu())
-            else:
-                for idx, decoder_feature_map in enumerate(decoder_feature_maps):
-                    if decoder_feature_map.shape[1:-1] == out.shape[1:-1]:
-                        decoder_feature_maps[idx] = torch.cat((decoder_feature_map, out.cpu()), dim=0)
+            # for featmap in decoder_feature_maps:
+            #     print(featmap.shape)
+
+            # if out.shape[1:-1] not in [decoder_feature_map.shape[1:-1] for decoder_feature_map in decoder_feature_maps]:
+            #     decoder_feature_maps.append(out.cpu())
+            # else:
+            #     for idx, decoder_feature_map in enumerate(decoder_feature_maps):
+            #         if decoder_feature_map.shape[1:-1] == out.shape[1:-1]:
+            #             decoder_feature_maps[idx] = torch.cat((decoder_feature_map, out.cpu()), dim=0)
+
+            # self.feature_maps['decoder_block'] = decoder_feature_maps
+
+            self.feature_maps['decoder_block'].append(out.cpu())
 
         for up_block in self.unet.up_blocks:
             self.hooks.append(up_block.register_forward_hook(hook_feat_map_up))
@@ -67,6 +91,8 @@ class DiffusionWrapper:
         self.hooks.append(self.unet.mid_block.register_forward_hook(hook_feat_map_mid))
         for decoder_block in self.vae.decoder.up_blocks:
             self.hooks.append(decoder_block.register_forward_hook(hook_feat_map_decoder))
+        for encoder_block in self.vae.encoder.down_blocks:
+            self.hooks.append(encoder_block.register_forward_hook(hook_feat_map_encoder))
 
     def extract_video_features(
             self,
@@ -107,7 +133,11 @@ class DiffusionWrapper:
 
             video = video.view(B*F, C, H, W)
 
+            for key in self.feature_maps.keys():
+                self.feature_maps[key].clear()
+
             latent_video = self.vae.encode(video).latent_dist.sample()
+
             latent_video = latent_video * self.scaling_factor
 
             _, LC, LH, LW = latent_video.shape
@@ -119,9 +149,6 @@ class DiffusionWrapper:
 
             noise = torch.randn(latent_video.shape, dtype=torch.float16, device=self.device)
             latent_video = self.scheduler.add_noise(latent_video, noise, last_scheduler_step)
-
-            for key in self.feature_maps.keys():
-                self.feature_maps[key].clear()
 
             noise_pred = self.unet(latent_video, last_scheduler_step, encoder_hidden_states=text_embeddings).sample
 
